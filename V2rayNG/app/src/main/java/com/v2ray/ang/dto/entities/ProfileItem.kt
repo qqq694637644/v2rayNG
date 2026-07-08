@@ -26,6 +26,7 @@ data class ProfileItem(
     var path: String? = null,
     var kcpMtu: Int? = null,
     var kcpTti: Int? = null,
+    var kcpSeed: String? = null,
 
     var quicSecurity: String? = null,
     var quicKey: String? = null,
@@ -100,6 +101,7 @@ data class ProfileItem(
                 && this.path == obj.path
                 && this.kcpMtu == obj.kcpMtu
                 && this.kcpTti == obj.kcpTti
+                && this.kcpSeed == obj.kcpSeed
                 && this.quicSecurity == obj.quicSecurity
                 && this.quicKey == obj.quicKey
                 && this.mode == obj.mode
