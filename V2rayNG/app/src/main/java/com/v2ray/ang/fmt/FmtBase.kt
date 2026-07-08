@@ -63,7 +63,11 @@ open class FmtBase {
 
         config.kcpMtu = queryParam["mtu"]?.toIntOrNull()
         config.kcpTti = queryParam["tti"]?.toIntOrNull()
-        config.kcpSeed = queryParam["seed"]
+        config.kcpUplinkCapacity = queryParam["uplinkCapacity"]?.toIntOrNull()
+        config.kcpDownlinkCapacity = queryParam["downlinkCapacity"]?.toIntOrNull()
+        config.kcpCongestion = queryParam["congestion"]?.let { it == "1" || it.equals("true", ignoreCase = true) }
+        config.kcpReadBufferSize = queryParam["readBufferSize"]?.toIntOrNull()
+        config.kcpWriteBufferSize = queryParam["writeBufferSize"]?.toIntOrNull()
         config.quicSecurity = queryParam["quicSecurity"]
         config.quicKey = queryParam["key"]
         config.mode = queryParam["mode"]
@@ -123,6 +127,11 @@ open class FmtBase {
         config.finalMask?.nullIfBlank()?.let { dicQuery["fm"] = it }
         config.kcpMtu?.let { dicQuery["mtu"] = it.toString() }
         config.kcpTti?.let { dicQuery["tti"] = it.toString() }
+        config.kcpUplinkCapacity?.let { dicQuery["uplinkCapacity"] = it.toString() }
+        config.kcpDownlinkCapacity?.let { dicQuery["downlinkCapacity"] = it.toString() }
+        if (config.kcpCongestion == true) dicQuery["congestion"] = "1"
+        config.kcpReadBufferSize?.let { dicQuery["readBufferSize"] = it.toString() }
+        config.kcpWriteBufferSize?.let { dicQuery["writeBufferSize"] = it.toString() }
         // Add two keys for compatibility: "insecure" and "allowInsecure"
         if (config.security == AppConfig.TLS) {
             val insecureFlag = if (config.insecure == true) "1" else "0"
@@ -140,8 +149,6 @@ open class FmtBase {
             }
 
             NetworkType.KCP -> {
-                config.headerType?.nullIfBlank()?.takeIf { it != "none" }?.let { dicQuery["headerType"] = it }
-                config.kcpSeed?.nullIfBlank()?.let { dicQuery["seed"] = it }
             }
 
             NetworkType.WS, NetworkType.HTTP_UPGRADE -> {

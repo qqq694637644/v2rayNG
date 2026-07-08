@@ -369,8 +369,12 @@ object CoreOutboundBuilder {
                 val kcpSetting = OutboundBean.StreamSettingsBean.KcpSettingsBean()
                 profileItem.kcpMtu?.let { kcpSetting.mtu = it }
                 profileItem.kcpTti?.let { kcpSetting.tti = it }
+                profileItem.kcpUplinkCapacity?.let { kcpSetting.uplinkCapacity = it }
+                profileItem.kcpDownlinkCapacity?.let { kcpSetting.downlinkCapacity = it }
+                profileItem.kcpCongestion?.let { kcpSetting.congestion = it }
+                profileItem.kcpReadBufferSize?.let { kcpSetting.readBufferSize = it }
+                profileItem.kcpWriteBufferSize?.let { kcpSetting.writeBufferSize = it }
                 streamSettings.kcpSettings = kcpSetting
-                streamSettings.finalmask = buildMkcpFinalMask(headerType, profileItem.kcpSeed)
             }
 
             NetworkType.WS.type -> {
@@ -497,44 +501,6 @@ object CoreOutboundBuilder {
             }
         }
         return sni
-    }
-
-    private fun buildMkcpFinalMask(headerType: String?, seed: String?): OutboundBean.StreamSettingsBean.FinalMaskBean {
-        val udp = arrayListOf<OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean>()
-        val headerMaskType = when (headerType?.trim()) {
-            "srtp" -> "header-srtp"
-            "utp" -> "header-utp"
-            "wechat-video" -> "header-wechat"
-            "dtls" -> "header-dtls"
-            "wireguard" -> "header-wireguard"
-            else -> null
-        }
-
-        headerMaskType?.let {
-            udp.add(
-                OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                    type = it,
-                    settings = OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean()
-                )
-            )
-        }
-
-        val password = seed?.trim().nullIfBlank()
-        udp.add(
-            if (password == null) {
-                OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                    type = "mkcp-original",
-                    settings = OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean()
-                )
-            } else {
-                OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                    type = "mkcp-aes128gcm",
-                    settings = OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(password = password)
-                )
-            }
-        )
-
-        return OutboundBean.StreamSettingsBean.FinalMaskBean(udp = udp)
     }
 
     /**

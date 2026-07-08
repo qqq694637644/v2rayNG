@@ -187,12 +187,12 @@ data class V2rayConfig(
 
             data class KcpSettingsBean(
                 var mtu: Int = 1350,
-                var tti: Int = 50,
-                var uplinkCapacity: Int = 12,
-                var downlinkCapacity: Int = 100,
+                var tti: Int = 20,
+                var uplinkCapacity: Int = 5,
+                var downlinkCapacity: Int = 20,
                 var congestion: Boolean = false,
-                var readBufferSize: Int = 1,
-                var writeBufferSize: Int = 1
+                var readBufferSize: Int = 2,
+                var writeBufferSize: Int = 2
             )
 
             data class WsSettingsBean(
