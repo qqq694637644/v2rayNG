@@ -63,7 +63,6 @@ open class FmtBase {
 
         config.kcpMtu = queryParam["mtu"]?.toIntOrNull()
         config.kcpTti = queryParam["tti"]?.toIntOrNull()
-        config.kcpSeed = queryParam["seed"]
         config.quicSecurity = queryParam["quicSecurity"]
         config.quicKey = queryParam["key"]
         config.mode = queryParam["mode"]
@@ -140,8 +139,6 @@ open class FmtBase {
             }
 
             NetworkType.KCP -> {
-                config.headerType?.nullIfBlank()?.takeIf { it != "none" }?.let { dicQuery["headerType"] = it }
-                config.kcpSeed?.nullIfBlank()?.let { dicQuery["seed"] = it }
             }
 
             NetworkType.WS, NetworkType.HTTP_UPGRADE -> {

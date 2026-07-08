@@ -135,7 +135,6 @@ class ServerActivity : BaseActivity() {
     private val et_port_hop_interval: EditText? by lazy { findViewById(R.id.et_port_hop_interval) }
     private val et_bandwidth_down: EditText? by lazy { findViewById(R.id.et_bandwidth_down) }
     private val et_bandwidth_up: EditText? by lazy { findViewById(R.id.et_bandwidth_up) }
-    private val et_kcp_seed: EditText? by lazy { findViewById(R.id.et_kcp_seed) }
     private val et_kcp_mtu: EditText? by lazy { findViewById(R.id.et_kcp_mtu) }
     private val et_kcp_tti: EditText? by lazy { findViewById(R.id.et_kcp_tti) }
     private val layout_kcp: LinearLayout? by lazy { findViewById(R.id.layout_kcp) }
@@ -180,8 +179,8 @@ class ServerActivity : BaseActivity() {
                 val types = transportTypes(networks[position])
                 val isMkcp = networks[position] == NetworkType.KCP.type
                 sp_header_type?.isEnabled = types.size > 1
-                sp_header_type?.visibility = View.VISIBLE
-                sp_header_type_title?.visibility = View.VISIBLE
+                sp_header_type?.visibility = if (isMkcp) View.GONE else View.VISIBLE
+                sp_header_type_title?.visibility = if (isMkcp) View.GONE else View.VISIBLE
                 val adapter =
                     ArrayAdapter(this@ServerActivity, android.R.layout.simple_spinner_item, types)
                 adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -196,7 +195,6 @@ class ServerActivity : BaseActivity() {
                     Utils.arrayFind(
                         types,
                         when (networks[position]) {
-                            NetworkType.KCP.type -> config?.headerType
                             NetworkType.GRPC.type -> config?.mode
                             NetworkType.XHTTP.type -> config?.xhttpMode
                             else -> config?.headerType
@@ -268,7 +266,6 @@ class ServerActivity : BaseActivity() {
                     }
                 et_kcp_mtu?.text = Utils.getEditable(config?.kcpMtu?.toString().orEmpty())
                 et_kcp_tti?.text = Utils.getEditable(config?.kcpTti?.toString().orEmpty())
-                et_kcp_seed?.text = Utils.getEditable(config?.kcpSeed.orEmpty())
 
                 layout_extra?.visibility =
                     when (networks[position]) {
@@ -472,7 +469,6 @@ class ServerActivity : BaseActivity() {
         sp_header_type?.setSelection(0)
         et_request_host?.text = null
         et_path?.text = null
-        et_kcp_seed?.text = null
         sp_stream_security?.setSelection(0)
         sp_allow_insecure?.setSelection(0)
         et_sni?.text = null
@@ -604,7 +600,7 @@ class ServerActivity : BaseActivity() {
 
         profileItem.network = networks[network]
         val isMkcp = networks[network] == NetworkType.KCP.type
-        profileItem.headerType = transportTypes(networks[network])[type]
+        profileItem.headerType = if (isMkcp) null else transportTypes(networks[network])[type]
         profileItem.host = if (isMkcp) null else requestHost
         profileItem.path = if (isMkcp) null else path
         profileItem.quicSecurity = requestHost
@@ -617,7 +613,6 @@ class ServerActivity : BaseActivity() {
         profileItem.finalMask = et_fm?.text?.toString()?.trim()?.nullIfBlank()
         profileItem.kcpMtu = et_kcp_mtu?.text?.toString()?.toIntOrNull()
         profileItem.kcpTti = et_kcp_tti?.text?.toString()?.toIntOrNull()
-        profileItem.kcpSeed = et_kcp_seed?.text?.toString()?.trim()?.nullIfBlank()
         if (networks[network] == NetworkType.WS.type || networks[network] == NetworkType.XHTTP.type) {
             val browserDialerMode = browserDialerModes[sp_browser_dialer_mode?.selectedItemPosition ?: 0]
             if (browserDialerMode != browserDialerModes[0]) {
