@@ -69,9 +69,6 @@ class ServerActivity : BaseActivity() {
     private val tcpTypes: Array<out String> by lazy {
         resources.getStringArray(R.array.header_type_tcp)
     }
-    private val kcpAndQuicTypes: Array<out String> by lazy {
-        resources.getStringArray(R.array.header_type_kcp_and_quic)
-    }
     private val grpcModes: Array<out String> by lazy {
         resources.getStringArray(R.array.mode_type_grpc)
     }
@@ -442,6 +439,9 @@ class ServerActivity : BaseActivity() {
             }
         }
 
+        if (config.network == "kcp") {
+            return false
+        }
         val network = Utils.arrayFind(networks, NetworkType.fromString(config.network).type)
         if (network >= 0) {
             sp_network?.setSelection(network)
@@ -603,7 +603,6 @@ class ServerActivity : BaseActivity() {
         profileItem.headerType = if (isMkcp) null else transportTypes(networks[network])[type]
         profileItem.host = if (isMkcp) null else requestHost
         profileItem.path = if (isMkcp) null else path
-        profileItem.seed = null
         profileItem.quicSecurity = requestHost
         profileItem.quicKey = path
         profileItem.mode = transportTypes(networks[network])[type]

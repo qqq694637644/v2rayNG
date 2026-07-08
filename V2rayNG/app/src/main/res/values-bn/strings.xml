@@ -65,7 +65,6 @@
     <string name="server_lab_path_xhttp">xhttp পথ</string>
     <string name="server_lab_path_h2">h2 পথ</string>
     <string name="server_lab_path_quic">QUIC কী</string>
-    <string name="server_lab_path_kcp">kcp বীজ</string>
     <string name="server_lab_path_grpc">gRPC সেবার নাম</string>
     <string name="server_lab_stream_security">TLS</string>
     <string name="server_lab_stream_fingerprint" translatable="false">ফিঙ্গারপ্রিন্ট</string>

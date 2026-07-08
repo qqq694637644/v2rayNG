@@ -14,9 +14,6 @@ enum class NetworkType(val type: String) {
     HYSTERIA("hysteria");
 
     companion object {
-        fun fromString(type: String?) = when (type) {
-            "kcp" -> KCP
-            else -> entries.find { it.type == type } ?: TCP
-        }
+        fun fromString(type: String?) = entries.find { it.type == type } ?: TCP
     }
 }

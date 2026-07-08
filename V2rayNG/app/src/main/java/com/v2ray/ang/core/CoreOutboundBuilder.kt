@@ -346,10 +346,10 @@ object CoreOutboundBuilder {
         val xhttpExtra = profileItem.xhttpExtra
         val finalMask = profileItem.finalMask
         var sni: String? = null
-        streamSettings.network = when (transport) {
-            "kcp" -> NetworkType.KCP.type
-            else -> transport.ifEmpty { NetworkType.TCP.type }
+        if (transport == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
         }
+        streamSettings.network = transport.ifEmpty { NetworkType.TCP.type }
         when (streamSettings.network) {
             NetworkType.TCP.type -> {
                 val tcpSetting = OutboundBean.StreamSettingsBean.TcpSettingsBean()

@@ -65,7 +65,6 @@
     <string name="server_lab_path_xhttp">Путь XHTTP</string>
     <string name="server_lab_path_h2">Путь H2</string>
     <string name="server_lab_path_quic">Ключ QUIC</string>
-    <string name="server_lab_path_kcp">Сид KCP</string>
     <string name="server_lab_path_grpc">Служба gRPC</string>
     <string name="server_lab_stream_security">TLS</string>
     <string name="server_lab_stream_fingerprint">Отпечаток</string>

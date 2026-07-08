@@ -52,24 +52,22 @@ open class FmtBase {
      * @param queryParam the query parameters to use for populating the ProfileItem
      */
     fun getItemFormQuery(config: ProfileItem, queryParam: Map<String, String>) {
-        config.network = when (queryParam["type"]) {
-            "kcp" -> NetworkType.KCP.type
-            null -> NetworkType.TCP.type
-            else -> queryParam["type"]
+        val network = queryParam["type"] ?: NetworkType.TCP.type
+        if (network == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
         }
+        if (network == NetworkType.KCP.type
+            && listOf("headerType", "seed", "host", "path").any { queryParam.containsKey(it) }
+        ) {
+            throw IllegalArgumentException("mkcp no longer accepts legacy headerType, seed, host, or path fields.")
+        }
+        config.network = network
         config.headerType = queryParam["headerType"]
         config.host = queryParam["host"]
         config.path = queryParam["path"]
 
-        config.seed = queryParam["seed"]
         config.kcpMtu = queryParam["mtu"]?.toIntOrNull()
         config.kcpTti = queryParam["tti"]?.toIntOrNull()
-        if (NetworkType.fromString(config.network) == NetworkType.KCP) {
-            config.headerType = null
-            config.host = null
-            config.path = null
-            config.seed = null
-        }
         config.quicSecurity = queryParam["quicSecurity"]
         config.quicKey = queryParam["key"]
         config.mode = queryParam["mode"]
@@ -110,6 +108,9 @@ open class FmtBase {
      * @return a map of query parameters
      */
     fun getQueryDic(config: ProfileItem): HashMap<String, String> {
+        if (config.network == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
+        }
         val dicQuery = HashMap<String, String>()
         dicQuery["security"] = config.security?.ifEmpty { "none" }.orEmpty()
         config.sni?.nullIfBlank()?.let { dicQuery["sni"] = it }
