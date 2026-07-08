@@ -23,7 +23,7 @@
 
     <string-array name="networks" translatable="false">
         <item>tcp</item>
-        <item>kcp</item>
+        <item>mkcp</item>
         <item>ws</item>
         <item>httpupgrade</item>
         <item>xhttp</item>

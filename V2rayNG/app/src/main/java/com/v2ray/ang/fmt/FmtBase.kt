@@ -52,7 +52,11 @@ open class FmtBase {
      * @param queryParam the query parameters to use for populating the ProfileItem
      */
     fun getItemFormQuery(config: ProfileItem, queryParam: Map<String, String>) {
-        config.network = queryParam["type"] ?: NetworkType.TCP.type
+        config.network = when (queryParam["type"]) {
+            "kcp" -> NetworkType.KCP.type
+            null -> NetworkType.TCP.type
+            else -> queryParam["type"]
+        }
         config.headerType = queryParam["headerType"]
         config.host = queryParam["host"]
         config.path = queryParam["path"]
@@ -60,6 +64,12 @@ open class FmtBase {
         config.seed = queryParam["seed"]
         config.kcpMtu = queryParam["mtu"]?.toIntOrNull()
         config.kcpTti = queryParam["tti"]?.toIntOrNull()
+        if (NetworkType.fromString(config.network) == NetworkType.KCP) {
+            config.headerType = null
+            config.host = null
+            config.path = null
+            config.seed = null
+        }
         config.quicSecurity = queryParam["quicSecurity"]
         config.quicKey = queryParam["key"]
         config.mode = queryParam["mode"]
@@ -133,8 +143,6 @@ open class FmtBase {
             }
 
             NetworkType.KCP -> {
-                dicQuery["headerType"] = config.headerType?.ifEmpty { "none" }.orEmpty()
-                config.seed?.nullIfBlank()?.let { dicQuery["seed"] = it }
             }
 
             NetworkType.WS, NetworkType.HTTP_UPGRADE -> {

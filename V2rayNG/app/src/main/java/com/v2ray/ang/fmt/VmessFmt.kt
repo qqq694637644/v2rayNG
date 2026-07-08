@@ -51,7 +51,10 @@ object VmessFmt : FmtBase() {
         config.method =
             if (TextUtils.isEmpty(vmessQRCode.scy)) AppConfig.DEFAULT_SECURITY else vmessQRCode.scy
 
-        config.network = vmessQRCode.net
+        config.network = when (vmessQRCode.net) {
+            "kcp" -> NetworkType.KCP.type
+            else -> vmessQRCode.net
+        }
         if (config.network.isNullOrEmpty()) {
             config.network = NetworkType.TCP.type
         }
@@ -61,7 +64,10 @@ object VmessFmt : FmtBase() {
 
         when (NetworkType.fromString(config.network)) {
             NetworkType.KCP -> {
-                config.seed = vmessQRCode.path
+                config.headerType = null
+                config.host = null
+                config.path = null
+                config.seed = null
             }
 
 //            NetworkType.QUIC -> {
@@ -110,13 +116,12 @@ object VmessFmt : FmtBase() {
         vmessQRCode.scy = config.method.orEmpty()
         vmessQRCode.aid = "0"
 
-        vmessQRCode.net = config.network.orEmpty()
-        vmessQRCode.type = config.headerType.orEmpty()
+        vmessQRCode.net = NetworkType.fromString(config.network).type
+        vmessQRCode.type = when (NetworkType.fromString(config.network)) {
+            NetworkType.KCP -> "none"
+            else -> config.headerType.orEmpty()
+        }
         when (NetworkType.fromString(config.network)) {
-            NetworkType.KCP -> {
-                vmessQRCode.path = config.seed.orEmpty()
-            }
-
 //            NetworkType.QUIC -> {
 //                vmessQRCode.host = config.quicSecurity.orEmpty()
 //                vmessQRCode.path = config.quicKey.orEmpty()
@@ -131,8 +136,10 @@ object VmessFmt : FmtBase() {
             else -> {}
         }
 
-        config.host?.nullIfBlank()?.let { vmessQRCode.host = it }
-        config.path?.nullIfBlank()?.let { vmessQRCode.path = it }
+        if (NetworkType.fromString(config.network) != NetworkType.KCP) {
+            config.host?.nullIfBlank()?.let { vmessQRCode.host = it }
+            config.path?.nullIfBlank()?.let { vmessQRCode.path = it }
+        }
 
         vmessQRCode.tls = config.security.orEmpty()
         vmessQRCode.sni = config.sni.orEmpty()
