@@ -137,6 +137,24 @@
                 android:layout_height="wrap_content"
                 android:inputType="number" />
         </LinearLayout>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/padding_spacing_dp16" android:text="uplinkCapacity (MB/s)" />
+        <EditText android:id="@+id/et_kcp_uplink_capacity" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/padding_spacing_dp16" android:text="downlinkCapacity (MB/s)" />
+        <EditText android:id="@+id/et_kcp_downlink_capacity" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/padding_spacing_dp16" android:text="congestion" />
+        <Switch android:id="@+id/sw_kcp_congestion" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/padding_spacing_dp16" android:text="readBufferSize (MB)" />
+        <EditText android:id="@+id/et_kcp_read_buffer_size" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/padding_spacing_dp16" android:text="writeBufferSize (MB)" />
+        <EditText android:id="@+id/et_kcp_write_buffer_size" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="@dimen/padding_spacing_dp16" android:text="FinalMask UDP header" />
+        <Spinner android:id="@+id/sp_kcp_finalmask_type" android:layout_width="match_parent" android:layout_height="wrap_content" />
     </LinearLayout>
 
     <LinearLayout

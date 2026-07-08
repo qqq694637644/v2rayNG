@@ -11,6 +11,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
@@ -90,6 +91,7 @@ class ServerActivity : BaseActivity() {
     private val browserDialerModes: Array<out String> by lazy {
         resources.getStringArray(R.array.browser_dialer_mode)
     }
+    private val kcpFinalMaskTypes = arrayOf("none", "header-srtp", "header-utp", "header-wechat", "header-dtls", "header-wireguard")
 
 
     // Kotlin synthetics was used, but since it is removed in 1.8. We switch to old manual approach.
@@ -137,9 +139,16 @@ class ServerActivity : BaseActivity() {
     private val et_bandwidth_up: EditText? by lazy { findViewById(R.id.et_bandwidth_up) }
     private val et_kcp_mtu: EditText? by lazy { findViewById(R.id.et_kcp_mtu) }
     private val et_kcp_tti: EditText? by lazy { findViewById(R.id.et_kcp_tti) }
+    private val et_kcp_uplink_capacity: EditText? by lazy { findViewById(R.id.et_kcp_uplink_capacity) }
+    private val et_kcp_downlink_capacity: EditText? by lazy { findViewById(R.id.et_kcp_downlink_capacity) }
+    private val sw_kcp_congestion: Switch? by lazy { findViewById(R.id.sw_kcp_congestion) }
+    private val et_kcp_read_buffer_size: EditText? by lazy { findViewById(R.id.et_kcp_read_buffer_size) }
+    private val et_kcp_write_buffer_size: EditText? by lazy { findViewById(R.id.et_kcp_write_buffer_size) }
+    private val sp_kcp_finalmask_type: Spinner? by lazy { findViewById(R.id.sp_kcp_finalmask_type) }
     private val layout_kcp: LinearLayout? by lazy { findViewById(R.id.layout_kcp) }
     private val et_extra: EditText? by lazy { findViewById(R.id.et_extra) }
     private val et_fm: EditText? by lazy { findViewById(R.id.et_fm) }
+    private val layout_fm: LinearLayout? by lazy { findViewById(R.id.layout_fm) }
     private val layout_extra: LinearLayout? by lazy { findViewById(R.id.layout_extra) }
     private val et_ech_config_list: EditText? by lazy { findViewById(R.id.et_ech_config_list) }
     private val container_ech_config_list: LinearLayout? by lazy { findViewById(R.id.lay_ech_config_list) }
@@ -168,6 +177,8 @@ class ServerActivity : BaseActivity() {
             else -> null
         } ?: return
         setContentViewWithToolbar(layoutId, showHomeAsUp = true, title = (config?.configType ?: createConfigType).toString())
+
+        sp_kcp_finalmask_type?.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, kcpFinalMaskTypes)
 
         sp_network?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
@@ -258,6 +269,7 @@ class ServerActivity : BaseActivity() {
                     }.orEmpty()
                 )
                 et_fm?.text = Utils.getEditable(config?.finalMask)
+                layout_fm?.visibility = if (isMkcp) View.GONE else View.VISIBLE
 
                 layout_kcp?.visibility =
                     when (networks[position]) {
@@ -266,6 +278,13 @@ class ServerActivity : BaseActivity() {
                     }
                 et_kcp_mtu?.text = Utils.getEditable(config?.kcpMtu?.toString().orEmpty())
                 et_kcp_tti?.text = Utils.getEditable(config?.kcpTti?.toString().orEmpty())
+                et_kcp_uplink_capacity?.text = Utils.getEditable((config?.kcpUplinkCapacity ?: 5).toString())
+                et_kcp_downlink_capacity?.text = Utils.getEditable((config?.kcpDownlinkCapacity ?: 20).toString())
+                sw_kcp_congestion?.isChecked = config?.kcpCongestion == true
+                et_kcp_read_buffer_size?.text = Utils.getEditable((config?.kcpReadBufferSize ?: 2).toString())
+                et_kcp_write_buffer_size?.text = Utils.getEditable((config?.kcpWriteBufferSize ?: 2).toString())
+                val kcpFinalMaskType = config?.kcpFinalMaskType ?: parseKcpFinalMaskType(config?.finalMask)
+                sp_kcp_finalmask_type?.setSelection(Utils.arrayFind(kcpFinalMaskTypes, kcpFinalMaskType).let { if (it >= 0) it else 0 })
 
                 layout_extra?.visibility =
                     when (networks[position]) {
@@ -531,7 +550,8 @@ class ServerActivity : BaseActivity() {
             }
         }
 
-        if (et_fm?.text?.toString().isNotNullEmpty()) {
+        val selectedNetwork = sp_network?.selectedItemPosition?.let { networks[it] }
+        if (selectedNetwork != NetworkType.KCP.type && et_fm?.text?.toString().isNotNullEmpty()) {
             if (JsonUtil.parseString(et_fm?.text?.toString()) == null) {
                 toast(R.string.server_lab_final_mask)
                 return false
@@ -610,9 +630,16 @@ class ServerActivity : BaseActivity() {
         profileItem.authority = requestHost
         profileItem.xhttpMode = transportTypes(networks[network])[type]
         profileItem.xhttpExtra = et_extra?.text?.toString()?.trim().nullIfBlank()
-        profileItem.finalMask = et_fm?.text?.toString()?.trim()?.nullIfBlank()
+        val kcpFinalMaskType = kcpFinalMaskTypes[sp_kcp_finalmask_type?.selectedItemPosition ?: 0]
+        profileItem.kcpFinalMaskType = if (isMkcp) kcpFinalMaskType else null
+        profileItem.finalMask = if (isMkcp) buildKcpFinalMask(kcpFinalMaskType) else et_fm?.text?.toString()?.trim()?.nullIfBlank()
         profileItem.kcpMtu = et_kcp_mtu?.text?.toString()?.toIntOrNull()
         profileItem.kcpTti = et_kcp_tti?.text?.toString()?.toIntOrNull()
+        profileItem.kcpUplinkCapacity = et_kcp_uplink_capacity?.text?.toString()?.toIntOrNull()
+        profileItem.kcpDownlinkCapacity = et_kcp_downlink_capacity?.text?.toString()?.toIntOrNull()
+        profileItem.kcpCongestion = sw_kcp_congestion?.isChecked
+        profileItem.kcpReadBufferSize = et_kcp_read_buffer_size?.text?.toString()?.toIntOrNull()
+        profileItem.kcpWriteBufferSize = et_kcp_write_buffer_size?.text?.toString()?.toIntOrNull()
         if (networks[network] == NetworkType.WS.type || networks[network] == NetworkType.XHTTP.type) {
             val browserDialerMode = browserDialerModes[sp_browser_dialer_mode?.selectedItemPosition ?: 0]
             if (browserDialerMode != browserDialerModes[0]) {
@@ -623,6 +650,25 @@ class ServerActivity : BaseActivity() {
         } else {
             profileItem.browserDialerMode = null
         }
+    }
+
+    private fun parseKcpFinalMaskType(finalMask: String?): String {
+        val json = JsonUtil.parseString(finalMask) ?: return kcpFinalMaskTypes[0]
+        val udp = json.getAsJsonArray("udp") ?: return kcpFinalMaskTypes[0]
+        udp.forEach { item ->
+            val type = item.asJsonObject.get("type")?.asString
+            if (type != null && kcpFinalMaskTypes.contains(type)) {
+                return type
+            }
+        }
+        return kcpFinalMaskTypes[0]
+    }
+
+    private fun buildKcpFinalMask(type: String?): String? {
+        if (type.isNullOrBlank() || type == kcpFinalMaskTypes[0]) {
+            return null
+        }
+        return "{\"udp\":[{\"type\":\"$type\",\"settings\":{}}]}"
     }
 
     private fun saveTls(config: ProfileItem) {

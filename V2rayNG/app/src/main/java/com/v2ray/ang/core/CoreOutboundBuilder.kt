@@ -369,6 +369,11 @@ object CoreOutboundBuilder {
                 val kcpSetting = OutboundBean.StreamSettingsBean.KcpSettingsBean()
                 profileItem.kcpMtu?.let { kcpSetting.mtu = it }
                 profileItem.kcpTti?.let { kcpSetting.tti = it }
+                profileItem.kcpUplinkCapacity?.let { kcpSetting.uplinkCapacity = it }
+                profileItem.kcpDownlinkCapacity?.let { kcpSetting.downlinkCapacity = it }
+                profileItem.kcpCongestion?.let { kcpSetting.congestion = it }
+                profileItem.kcpReadBufferSize?.let { kcpSetting.readBufferSize = it }
+                profileItem.kcpWriteBufferSize?.let { kcpSetting.writeBufferSize = it }
                 streamSettings.kcpSettings = kcpSetting
             }
 
