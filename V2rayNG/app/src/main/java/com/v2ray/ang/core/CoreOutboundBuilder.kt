@@ -370,7 +370,7 @@ object CoreOutboundBuilder {
                 profileItem.kcpMtu?.let { kcpSetting.mtu = it }
                 profileItem.kcpTti?.let { kcpSetting.tti = it }
                 streamSettings.kcpSettings = kcpSetting
-                streamSettings.finalmask = buildMkcpFinalMask(headerType, profileItem.kcpSeed)
+                buildMkcpFinalMask(headerType, profileItem.kcpSeed)?.let { streamSettings.finalmask = it }
             }
 
             NetworkType.WS.type -> {
@@ -499,7 +499,7 @@ object CoreOutboundBuilder {
         return sni
     }
 
-    private fun buildMkcpFinalMask(headerType: String?, seed: String?): OutboundBean.StreamSettingsBean.FinalMaskBean {
+    private fun buildMkcpFinalMask(headerType: String?, seed: String?): OutboundBean.StreamSettingsBean.FinalMaskBean? {
         val udp = arrayListOf<OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean>()
         val headerMaskType = when (headerType?.trim()) {
             "srtp" -> "header-srtp"
@@ -508,6 +508,11 @@ object CoreOutboundBuilder {
             "dtls" -> "header-dtls"
             "wireguard" -> "header-wireguard"
             else -> null
+        }
+        val password = seed?.trim().nullIfBlank()
+
+        if (headerMaskType == null && password == null) {
+            return null
         }
 
         headerMaskType?.let {
@@ -519,7 +524,6 @@ object CoreOutboundBuilder {
             )
         }
 
-        val password = seed?.trim().nullIfBlank()
         udp.add(
             if (password == null) {
                 OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
