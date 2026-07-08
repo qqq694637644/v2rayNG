@@ -52,12 +52,20 @@ open class FmtBase {
      * @param queryParam the query parameters to use for populating the ProfileItem
      */
     fun getItemFormQuery(config: ProfileItem, queryParam: Map<String, String>) {
-        config.network = queryParam["type"] ?: NetworkType.TCP.type
+        val network = queryParam["type"] ?: NetworkType.TCP.type
+        if (network == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
+        }
+        if (network == NetworkType.KCP.type
+            && listOf("headerType", "seed", "host", "path").any { queryParam.containsKey(it) }
+        ) {
+            throw IllegalArgumentException("mkcp no longer accepts legacy headerType, seed, host, or path fields.")
+        }
+        config.network = network
         config.headerType = queryParam["headerType"]
         config.host = queryParam["host"]
         config.path = queryParam["path"]
 
-        config.seed = queryParam["seed"]
         config.kcpMtu = queryParam["mtu"]?.toIntOrNull()
         config.kcpTti = queryParam["tti"]?.toIntOrNull()
         config.quicSecurity = queryParam["quicSecurity"]
@@ -100,6 +108,9 @@ open class FmtBase {
      * @return a map of query parameters
      */
     fun getQueryDic(config: ProfileItem): HashMap<String, String> {
+        if (config.network == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
+        }
         val dicQuery = HashMap<String, String>()
         dicQuery["security"] = config.security?.ifEmpty { "none" }.orEmpty()
         config.sni?.nullIfBlank()?.let { dicQuery["sni"] = it }
@@ -133,8 +144,6 @@ open class FmtBase {
             }
 
             NetworkType.KCP -> {
-                dicQuery["headerType"] = config.headerType?.ifEmpty { "none" }.orEmpty()
-                config.seed?.nullIfBlank()?.let { dicQuery["seed"] = it }
             }
 
             NetworkType.WS, NetworkType.HTTP_UPGRADE -> {

@@ -337,7 +337,6 @@ object CoreOutboundBuilder {
         val headerType = profileItem.headerType
         val host = profileItem.host
         val path = profileItem.path
-        val seed = profileItem.seed
 //        val quicSecurity = profileItem.quicSecurity
 //        val key = profileItem.quicKey
         val mode = profileItem.mode
@@ -347,6 +346,9 @@ object CoreOutboundBuilder {
         val xhttpExtra = profileItem.xhttpExtra
         val finalMask = profileItem.finalMask
         var sni: String? = null
+        if (transport == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
+        }
         streamSettings.network = transport.ifEmpty { NetworkType.TCP.type }
         when (streamSettings.network) {
             NetworkType.TCP.type -> {
@@ -368,47 +370,6 @@ object CoreOutboundBuilder {
                 profileItem.kcpMtu?.let { kcpSetting.mtu = it }
                 profileItem.kcpTti?.let { kcpSetting.tti = it }
                 streamSettings.kcpSettings = kcpSetting
-                val udpMaskList =
-                    mutableListOf<OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean>()
-                if (!headerType.isNullOrEmpty() && headerType != "none") {
-                    val kcpHeaderType = when {
-                        headerType == "wechat-video" -> "wechat"
-                        else -> headerType
-                    }
-                    udpMaskList.add(
-                        OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                            type = "mkcp-legacy",
-                            settings =
-                                OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
-                                    header = kcpHeaderType,
-                                    value = if (headerType == "dns" && !host.isNullOrEmpty()) {
-                                        host
-                                    } else {
-                                        null
-                                    }
-                                )
-                        )
-                    )
-                }
-                if (seed.isNullOrEmpty()) {
-                    udpMaskList.add(
-                        OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                            type = "mkcp-legacy"
-                        )
-                    )
-                } else {
-                    udpMaskList.add(
-                        OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean(
-                            type = "mkcp-legacy",
-                            settings = OutboundBean.StreamSettingsBean.FinalMaskBean.MaskBean.MaskSettingsBean(
-                                value = seed
-                            )
-                        )
-                    )
-                }
-                streamSettings.finalmask = OutboundBean.StreamSettingsBean.FinalMaskBean(
-                    udp = udpMaskList.toList()
-                )
             }
 
             NetworkType.WS.type -> {

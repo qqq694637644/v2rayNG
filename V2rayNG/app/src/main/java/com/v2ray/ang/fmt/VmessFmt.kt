@@ -51,19 +51,23 @@ object VmessFmt : FmtBase() {
         config.method =
             if (TextUtils.isEmpty(vmessQRCode.scy)) AppConfig.DEFAULT_SECURITY else vmessQRCode.scy
 
+        if (vmessQRCode.net == "kcp") {
+            return null
+        }
         config.network = vmessQRCode.net
         if (config.network.isNullOrEmpty()) {
             config.network = NetworkType.TCP.type
+        }
+        if (config.network == NetworkType.KCP.type
+            && listOf(vmessQRCode.type, vmessQRCode.host, vmessQRCode.path).any { !it.isNullOrEmpty() }
+        ) {
+            return null
         }
         config.headerType = vmessQRCode.type
         config.host = vmessQRCode.host
         config.path = vmessQRCode.path
 
         when (NetworkType.fromString(config.network)) {
-            NetworkType.KCP -> {
-                config.seed = vmessQRCode.path
-            }
-
 //            NetworkType.QUIC -> {
 //                config.quicSecurity = vmessQRCode.host
 //                config.quicKey = vmessQRCode.path
@@ -100,6 +104,9 @@ object VmessFmt : FmtBase() {
      * @return the converted URI string
      */
     fun toUri(config: ProfileItem): String {
+        if (config.network == "kcp") {
+            throw IllegalArgumentException("Legacy kcp transport is not supported by this Xray-core 26.3.27 profile. Use mkcp without headerType or seed.")
+        }
         val vmessQRCode = VmessQRCode()
 
         vmessQRCode.v = "2"
@@ -110,13 +117,12 @@ object VmessFmt : FmtBase() {
         vmessQRCode.scy = config.method.orEmpty()
         vmessQRCode.aid = "0"
 
-        vmessQRCode.net = config.network.orEmpty()
-        vmessQRCode.type = config.headerType.orEmpty()
-        when (NetworkType.fromString(config.network)) {
-            NetworkType.KCP -> {
-                vmessQRCode.path = config.seed.orEmpty()
-            }
-
+        val networkType = NetworkType.fromString(config.network)
+        vmessQRCode.net = networkType.type
+        if (networkType != NetworkType.KCP) {
+            vmessQRCode.type = config.headerType.orEmpty()
+        }
+        when (networkType) {
 //            NetworkType.QUIC -> {
 //                vmessQRCode.host = config.quicSecurity.orEmpty()
 //                vmessQRCode.path = config.quicKey.orEmpty()
@@ -131,8 +137,10 @@ object VmessFmt : FmtBase() {
             else -> {}
         }
 
-        config.host?.nullIfBlank()?.let { vmessQRCode.host = it }
-        config.path?.nullIfBlank()?.let { vmessQRCode.path = it }
+        if (networkType != NetworkType.KCP) {
+            config.host?.nullIfBlank()?.let { vmessQRCode.host = it }
+            config.path?.nullIfBlank()?.let { vmessQRCode.path = it }
+        }
 
         vmessQRCode.tls = config.security.orEmpty()
         vmessQRCode.sni = config.sni.orEmpty()

@@ -65,7 +65,6 @@
     <string name="server_lab_path_xhttp">xhttp path</string>
     <string name="server_lab_path_h2">h2 path</string>
     <string name="server_lab_path_quic">QUIC 加密密钥</string>
-    <string name="server_lab_path_kcp">kcp seed</string>
     <string name="server_lab_path_grpc">gRPC serviceName</string>
     <string name="server_lab_stream_security">传输层安全 (TLS)</string>
     <string name="server_lab_stream_fingerprint">Fingerprint</string>

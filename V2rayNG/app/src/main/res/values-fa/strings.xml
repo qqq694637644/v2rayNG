@@ -65,7 +65,6 @@
     <string name="server_lab_path_xhttp">مسیر XHTTP</string>
     <string name="server_lab_path_h2">مسیر H2</string>
     <string name="server_lab_path_quic">مسیر QUIC</string>
-    <string name="server_lab_path_kcp">KCP سید</string>
     <string name="server_lab_path_grpc">gRPC نام سرویس</string>
     <string name="server_lab_stream_security">TLS</string>
     <string name="server_lab_stream_fingerprint">اثرانگشت</string>

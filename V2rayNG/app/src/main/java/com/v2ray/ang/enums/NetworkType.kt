@@ -2,7 +2,7 @@ package com.v2ray.ang.enums
 
 enum class NetworkType(val type: String) {
     TCP("tcp"),
-    KCP("kcp"),
+    KCP("mkcp"),
     WS("ws"),
     HTTP_UPGRADE("httpupgrade"),
     XHTTP("xhttp"),

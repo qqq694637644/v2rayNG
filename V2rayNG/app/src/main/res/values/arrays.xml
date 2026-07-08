@@ -23,7 +23,7 @@
 
     <string-array name="networks" translatable="false">
         <item>tcp</item>
-        <item>kcp</item>
+        <item>mkcp</item>
         <item>ws</item>
         <item>httpupgrade</item>
         <item>xhttp</item>
@@ -34,16 +34,6 @@
     <string-array name="header_type_tcp" translatable="false">
         <item>none</item>
         <item>http</item>
-    </string-array>
-
-    <string-array name="header_type_kcp_and_quic" translatable="false">
-        <item>none</item>
-        <item>srtp</item>
-        <item>utp</item>
-        <item>wechat-video</item>
-        <item>dtls</item>
-        <item>wireguard</item>
-        <item>dns</item>
     </string-array>
 
     <string-array name="mode_type_grpc" translatable="false">

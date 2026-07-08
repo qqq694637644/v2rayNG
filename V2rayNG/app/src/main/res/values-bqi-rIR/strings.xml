@@ -65,7 +65,6 @@
     <string name="server_lab_path_xhttp">تور XHTTP</string>
     <string name="server_lab_path_h2">تور H2</string>
     <string name="server_lab_path_quic">تور QUIC</string>
-    <string name="server_lab_path_kcp">KCP seed</string>
     <string name="server_lab_path_grpc">نوم سرویس gRPC</string>
     <string name="server_lab_stream_security">TLS</string>
     <string name="server_lab_stream_fingerprint" translatable="false">Fingerprint</string>

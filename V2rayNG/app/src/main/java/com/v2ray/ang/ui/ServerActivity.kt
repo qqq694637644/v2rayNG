@@ -69,9 +69,6 @@ class ServerActivity : BaseActivity() {
     private val tcpTypes: Array<out String> by lazy {
         resources.getStringArray(R.array.header_type_tcp)
     }
-    private val kcpAndQuicTypes: Array<out String> by lazy {
-        resources.getStringArray(R.array.header_type_kcp_and_quic)
-    }
     private val grpcModes: Array<out String> by lazy {
         resources.getStringArray(R.array.mode_type_grpc)
     }
@@ -180,7 +177,10 @@ class ServerActivity : BaseActivity() {
                 id: Long,
             ) {
                 val types = transportTypes(networks[position])
+                val isMkcp = networks[position] == NetworkType.KCP.type
                 sp_header_type?.isEnabled = types.size > 1
+                sp_header_type?.visibility = if (isMkcp) View.GONE else View.VISIBLE
+                sp_header_type_title?.visibility = if (isMkcp) View.GONE else View.VISIBLE
                 val adapter =
                     ArrayAdapter(this@ServerActivity, android.R.layout.simple_spinner_item, types)
                 adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -204,6 +204,7 @@ class ServerActivity : BaseActivity() {
 
                 et_request_host?.text = Utils.getEditable(
                     when (networks[position]) {
+                        NetworkType.KCP.type -> null
                         //"quic" -> config?.quicSecurity
                         NetworkType.GRPC.type -> config?.authority
                         else -> config?.host
@@ -211,7 +212,7 @@ class ServerActivity : BaseActivity() {
                 )
                 et_path?.text = Utils.getEditable(
                     when (networks[position]) {
-                        NetworkType.KCP.type -> config?.seed
+                        NetworkType.KCP.type -> null
                         //"quic" -> config?.quicKey
                         NetworkType.GRPC.type -> config?.serviceName
                         else -> config?.path
@@ -232,11 +233,12 @@ class ServerActivity : BaseActivity() {
                         }
                     )
                 )
+                tv_request_host?.visibility = if (isMkcp) View.GONE else View.VISIBLE
+                et_request_host?.visibility = if (isMkcp) View.GONE else View.VISIBLE
 
                 tv_path?.text = Utils.getEditable(
                     getString(
                         when (networks[position]) {
-                            NetworkType.KCP.type -> R.string.server_lab_path_kcp
                             NetworkType.WS.type -> R.string.server_lab_path_ws
                             NetworkType.HTTP_UPGRADE.type -> R.string.server_lab_path_httpupgrade
                             NetworkType.XHTTP.type -> R.string.server_lab_path_xhttp
@@ -247,6 +249,8 @@ class ServerActivity : BaseActivity() {
                         }
                     )
                 )
+                tv_path?.visibility = if (isMkcp) View.GONE else View.VISIBLE
+                et_path?.visibility = if (isMkcp) View.GONE else View.VISIBLE
                 et_extra?.text = Utils.getEditable(
                     when (networks[position]) {
                         NetworkType.XHTTP.type -> config?.xhttpExtra
@@ -435,7 +439,10 @@ class ServerActivity : BaseActivity() {
             }
         }
 
-        val network = Utils.arrayFind(networks, config.network.orEmpty())
+        if (config.network == "kcp") {
+            return false
+        }
+        val network = Utils.arrayFind(networks, NetworkType.fromString(config.network).type)
         if (network >= 0) {
             sp_network?.setSelection(network)
         }
@@ -592,10 +599,10 @@ class ServerActivity : BaseActivity() {
         val path = et_path?.text?.toString()?.trim() ?: return
 
         profileItem.network = networks[network]
-        profileItem.headerType = transportTypes(networks[network])[type]
-        profileItem.host = requestHost
-        profileItem.path = path
-        profileItem.seed = path
+        val isMkcp = networks[network] == NetworkType.KCP.type
+        profileItem.headerType = if (isMkcp) null else transportTypes(networks[network])[type]
+        profileItem.host = if (isMkcp) null else requestHost
+        profileItem.path = if (isMkcp) null else path
         profileItem.quicSecurity = requestHost
         profileItem.quicKey = path
         profileItem.mode = transportTypes(networks[network])[type]
@@ -701,7 +708,7 @@ class ServerActivity : BaseActivity() {
             }
 
             NetworkType.KCP.type -> {
-                kcpAndQuicTypes
+                arrayOf("none")
             }
 
             NetworkType.GRPC.type -> {
