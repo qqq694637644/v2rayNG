@@ -7,14 +7,14 @@ on:
         required: false
         type: string
       android_libxraylite_tag:
-        description: 'AndroidLibXrayLite release tag to download libv2ray.aar from; empty uses the checked-out submodule tag'
+        description: 'AndroidLibXrayLite release tag to download libv2ray.aar from'
         required: false
-        default: ''
+        default: 'v26.3.27-v2rayng'
         type: string
       android_libxraylite_repository:
-        description: 'Repository to download libv2ray.aar from, for example qqq694637644/AndroidLibXrayLite'
+        description: 'Repository to download libv2ray.aar from'
         required: false
-        default: '2dust/AndroidLibXrayLite'
+        default: 'qqq694637644/AndroidLibXrayLite'
         type: string
   push:
     branches:
@@ -77,9 +77,9 @@ jobs:
     - name: Resolve AndroidLibXrayLite tag
       env:
         REQUESTED_ANDROID_LIBXRAYLITE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_tag || '' }}
-        REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_repository || '2dust/AndroidLibXrayLite' }}
+        REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_repository || 'qqq694637644/AndroidLibXrayLite' }}
       run: |
-        CURRENT_REPOSITORY="${REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY:-2dust/AndroidLibXrayLite}"
+        CURRENT_REPOSITORY="${REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY:-qqq694637644/AndroidLibXrayLite}"
         if [ -n "$REQUESTED_ANDROID_LIBXRAYLITE_TAG" ]; then
           CURRENT_TAG="$REQUESTED_ANDROID_LIBXRAYLITE_TAG"
           echo "Using requested AndroidLibXrayLite tag: $CURRENT_TAG"
