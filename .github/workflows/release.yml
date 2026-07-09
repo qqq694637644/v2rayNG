@@ -20,6 +20,11 @@ on:
         required: false
         default: false
         type: boolean
+      android_libxraylite_tag:
+        description: 'AndroidLibXrayLite release tag to download libv2ray.aar from; empty uses the checked-out submodule tag'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -81,14 +86,22 @@ jobs:
           set -euo pipefail
           cp -r "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/V2rayNG/app"
 
-      - name: Fetch AndroidLibXrayLite tag
+      - name: Resolve AndroidLibXrayLite tag
         shell: bash
+        env:
+          REQUESTED_ANDROID_LIBXRAYLITE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_tag || '' }}
         run: |
           set -euo pipefail
-          pushd AndroidLibXrayLite
-          current_tag=$(git describe --tags --abbrev=0)
+          if [[ -n "$REQUESTED_ANDROID_LIBXRAYLITE_TAG" ]]; then
+            current_tag="$REQUESTED_ANDROID_LIBXRAYLITE_TAG"
+            echo "Using requested AndroidLibXrayLite tag: $current_tag"
+          else
+            pushd AndroidLibXrayLite
+            current_tag=$(git describe --tags --abbrev=0)
+            echo "Using AndroidLibXrayLite submodule tag: $current_tag"
+            popd
+          fi
           echo "CURRENT_TAG=$current_tag" >> "$GITHUB_ENV"
-          popd
 
       - name: Download libv2ray
         uses: robinraju/release-downloader@v1.13
