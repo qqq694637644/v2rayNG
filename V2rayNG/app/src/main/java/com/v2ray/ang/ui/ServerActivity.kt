@@ -202,7 +202,8 @@ class ServerActivity : BaseActivity() {
                         NetworkType.XHTTP.type -> getString(R.string.server_lab_xhttp_mode)
                         else -> getString(R.string.server_lab_head_type)
                     }.orEmpty()
-                sp_header_type?.setSelection(
+                setSpinnerSelectionOrDefault(
+                    sp_header_type,
                     Utils.arrayFind(
                         types,
                         when (networks[position]) {
@@ -538,7 +539,7 @@ class ServerActivity : BaseActivity() {
             return false
         }
         sp_stream_security?.let {
-            if (config.configType == EConfigType.TROJAN && TextUtils.isEmpty(streamSecuritys[it.selectedItemPosition])) {
+            if (config.configType == EConfigType.TROJAN && TextUtils.isEmpty(streamSecuritys[selectedPositionOrDefault(it, streamSecuritys.size)])) {
                 toast(R.string.server_lab_stream_security)
                 return false
             }
@@ -550,7 +551,7 @@ class ServerActivity : BaseActivity() {
             }
         }
 
-        val selectedNetwork = sp_network?.selectedItemPosition?.let { networks[it] }
+        val selectedNetwork = networks[selectedPositionOrDefault(sp_network, networks.size)]
         if (selectedNetwork != NetworkType.KCP.type && et_fm?.text?.toString().isNotNullEmpty()) {
             if (JsonUtil.parseString(et_fm?.text?.toString()) == null) {
                 toast(R.string.server_lab_final_mask)
@@ -584,12 +585,12 @@ class ServerActivity : BaseActivity() {
         config.password = et_id.text.toString().trim()
 
         if (config.configType == EConfigType.VMESS) {
-            config.method = securitys[sp_security?.selectedItemPosition ?: 0]
+            config.method = securitys[selectedPositionOrDefault(sp_security, securitys.size)]
         } else if (config.configType == EConfigType.VLESS) {
             config.method = et_security?.text.toString().trim()
-            config.flow = flows[sp_flow?.selectedItemPosition ?: 0]
+            config.flow = flows[selectedPositionOrDefault(sp_flow, flows.size)]
         } else if (config.configType == EConfigType.SHADOWSOCKS) {
-            config.method = shadowsocksSecuritys[sp_security?.selectedItemPosition ?: 0]
+            config.method = shadowsocksSecuritys[selectedPositionOrDefault(sp_security, shadowsocksSecuritys.size)]
         } else if (config.configType == EConfigType.SOCKS || config.configType == EConfigType.HTTP) {
             if (!TextUtils.isEmpty(et_security?.text) || !TextUtils.isEmpty(et_id.text)) {
                 config.username = et_security?.text.toString().trim()
@@ -613,26 +614,33 @@ class ServerActivity : BaseActivity() {
 
 
     private fun saveStreamSettings(profileItem: ProfileItem) {
-        val network = sp_network?.selectedItemPosition ?: return
-        val type = sp_header_type?.selectedItemPosition ?: return
+        val network = selectedPositionOrDefault(sp_network, networks.size)
+        val selectedNetwork = networks[network]
+        val isMkcp = selectedNetwork == NetworkType.KCP.type
+        val wasMkcp = NetworkType.fromString(profileItem.network).type == NetworkType.KCP.type
+        val types = transportTypes(selectedNetwork)
+        val type = selectedPositionOrDefault(sp_header_type, types.size)
         val requestHost = et_request_host?.text?.toString()?.trim() ?: return
         val path = et_path?.text?.toString()?.trim() ?: return
 
-        profileItem.network = networks[network]
-        val isMkcp = networks[network] == NetworkType.KCP.type
-        profileItem.headerType = if (isMkcp) null else transportTypes(networks[network])[type]
+        profileItem.network = selectedNetwork
+        profileItem.headerType = if (isMkcp) null else types[type]
         profileItem.host = if (isMkcp) null else requestHost
         profileItem.path = if (isMkcp) null else path
-        profileItem.quicSecurity = requestHost
-        profileItem.quicKey = path
-        profileItem.mode = transportTypes(networks[network])[type]
-        profileItem.serviceName = path
-        profileItem.authority = requestHost
-        profileItem.xhttpMode = transportTypes(networks[network])[type]
-        profileItem.xhttpExtra = et_extra?.text?.toString()?.trim().nullIfBlank()
-        val kcpFinalMaskType = kcpFinalMaskTypes[sp_kcp_finalmask_type?.selectedItemPosition ?: 0]
+        profileItem.quicSecurity = if (isMkcp) null else requestHost
+        profileItem.quicKey = if (isMkcp) null else path
+        profileItem.mode = if (isMkcp) null else types[type]
+        profileItem.serviceName = if (isMkcp) null else path
+        profileItem.authority = if (isMkcp) null else requestHost
+        profileItem.xhttpMode = if (isMkcp) null else types[type]
+        profileItem.xhttpExtra = if (isMkcp) null else et_extra?.text?.toString()?.trim().nullIfBlank()
+        val kcpFinalMaskType = kcpFinalMaskTypes[selectedPositionOrDefault(sp_kcp_finalmask_type, kcpFinalMaskTypes.size)]
         profileItem.kcpFinalMaskType = if (isMkcp) kcpFinalMaskType else null
-        profileItem.finalMask = if (isMkcp) buildKcpFinalMask(kcpFinalMaskType) else et_fm?.text?.toString()?.trim()?.nullIfBlank()
+        profileItem.finalMask = when {
+            isMkcp -> buildKcpFinalMask(kcpFinalMaskType)
+            wasMkcp -> null
+            else -> et_fm?.text?.toString()?.trim()?.nullIfBlank()
+        }
         profileItem.kcpMtu = et_kcp_mtu?.text?.toString()?.toIntOrNull()
         profileItem.kcpTti = et_kcp_tti?.text?.toString()?.toIntOrNull()
         profileItem.kcpUplinkCapacity = et_kcp_uplink_capacity?.text?.toString()?.toIntOrNull()
@@ -640,8 +648,8 @@ class ServerActivity : BaseActivity() {
         profileItem.kcpCongestion = sw_kcp_congestion?.isChecked
         profileItem.kcpReadBufferSize = et_kcp_read_buffer_size?.text?.toString()?.toIntOrNull()
         profileItem.kcpWriteBufferSize = et_kcp_write_buffer_size?.text?.toString()?.toIntOrNull()
-        if (networks[network] == NetworkType.WS.type || networks[network] == NetworkType.XHTTP.type) {
-            val browserDialerMode = browserDialerModes[sp_browser_dialer_mode?.selectedItemPosition ?: 0]
+        if (selectedNetwork == NetworkType.WS.type || selectedNetwork == NetworkType.XHTTP.type) {
+            val browserDialerMode = browserDialerModes[selectedPositionOrDefault(sp_browser_dialer_mode, browserDialerModes.size)]
             if (browserDialerMode != browserDialerModes[0]) {
                 profileItem.browserDialerMode = browserDialerMode
             } else {
@@ -654,9 +662,9 @@ class ServerActivity : BaseActivity() {
 
     private fun parseKcpFinalMaskType(finalMask: String?): String {
         val json = JsonUtil.parseString(finalMask) ?: return kcpFinalMaskTypes[0]
-        val udp = json.getAsJsonArray("udp") ?: return kcpFinalMaskTypes[0]
+        val udp = runCatching { json.getAsJsonArray("udp") }.getOrNull() ?: return kcpFinalMaskTypes[0]
         udp.forEach { item ->
-            val type = item.asJsonObject.get("type")?.asString
+            val type = runCatching { item.asJsonObject.get("type")?.asString }.getOrNull()
             if (type != null && kcpFinalMaskTypes.contains(type)) {
                 return type
             }
@@ -672,11 +680,11 @@ class ServerActivity : BaseActivity() {
     }
 
     private fun saveTls(config: ProfileItem) {
-        val streamSecurity = sp_stream_security?.selectedItemPosition ?: return
+        val streamSecurity = selectedPositionOrDefault(sp_stream_security, streamSecuritys.size)
         val sniField = et_sni?.text?.toString()?.trim()
-        val allowInsecureField = sp_allow_insecure?.selectedItemPosition
-        val utlsIndex = sp_stream_fingerprint?.selectedItemPosition ?: 0
-        val alpnIndex = sp_stream_alpn?.selectedItemPosition ?: 0
+        val allowInsecureField = selectedPositionOrDefault(sp_allow_insecure, allowinsecures.size)
+        val utlsIndex = selectedPositionOrDefault(sp_stream_fingerprint, uTlsItems.size)
+        val alpnIndex = selectedPositionOrDefault(sp_stream_alpn, alpns.size)
         val publicKey = et_public_key?.text?.toString()
         val shortId = et_short_id?.text?.toString()
         val spiderX = et_spider_x?.text?.toString()
@@ -686,7 +694,7 @@ class ServerActivity : BaseActivity() {
         val pinnedCA256 = et_pinned_ca256?.text?.toString()
 
         val allowInsecure =
-            if (allowInsecureField == null || allowinsecures[allowInsecureField].isBlank()) {
+            if (allowinsecures[allowInsecureField].isBlank()) {
                 false
             } else {
                 allowinsecures[allowInsecureField].toBoolean()
@@ -754,7 +762,7 @@ class ServerActivity : BaseActivity() {
             }
 
             NetworkType.KCP.type -> {
-                arrayOf("none", "srtp", "utp", "wechat-video", "dtls", "wireguard")
+                arrayOf("none")
             }
 
             NetworkType.GRPC.type -> {
@@ -769,6 +777,16 @@ class ServerActivity : BaseActivity() {
                 arrayOf("---")
             }
         }
+    }
+
+    private fun selectedPositionOrDefault(spinner: Spinner?, size: Int, defaultPosition: Int = 0): Int {
+        if (size <= 0) return defaultPosition
+        val position = spinner?.selectedItemPosition ?: defaultPosition
+        return if (position in 0 until size) position else defaultPosition.coerceIn(0, size - 1)
+    }
+
+    private fun setSpinnerSelectionOrDefault(spinner: Spinner?, position: Int, defaultPosition: Int = 0) {
+        spinner?.setSelection(if (position >= 0) position else defaultPosition)
     }
 
     /**
