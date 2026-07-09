@@ -23,7 +23,7 @@ on:
       android_libxraylite_tag:
         description: 'AndroidLibXrayLite release tag to download libv2ray.aar from'
         required: false
-        default: 'v26.3.27-v2rayng'
+        default: 'v26.3.27-v2rayng-r2'
         type: string
       android_libxraylite_repository:
         description: 'Repository to download libv2ray.aar from'
