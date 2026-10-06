@@ -61,7 +61,6 @@ class NetLoopPluginManager(
         STOPPED,
         STARTING,
         READY,
-        ERROR,
     }
 
     data class Status(
@@ -69,7 +68,6 @@ class NetLoopPluginManager(
         val state: State,
         val nodeId: String?,
         val primaryOverlayAddress: String?,
-        val lastError: String?,
     )
 
     private val appContext = context.applicationContext
@@ -142,10 +140,6 @@ class NetLoopPluginManager(
             return status
         }
 
-        if (status.state == State.ERROR) {
-            throw IllegalStateException(status.lastError ?: "NetLoop startup failed.")
-        }
-
         status = withTimeout(START_TIMEOUT_MS) {
             var current = status
             while (current.state == State.STARTING) {
@@ -156,7 +150,7 @@ class NetLoopPluginManager(
         }
 
         if (status.state != State.READY) {
-            throw IllegalStateException(status.lastError ?: "NetLoop startup failed.")
+            throw IllegalStateException("NetLoop stopped before reaching READY.")
         }
 
         expectedRunning = true
@@ -335,16 +329,17 @@ class NetLoopPluginManager(
         if (data.getBoolean("ok", false)) return
         throw IllegalStateException(
             data.getString("error")
-                ?: data.getString("last_error")
                 ?: "NetLoop control request failed."
         )
     }
 
     private fun parseStatus(data: Bundle): Status {
+        val stateText = data.getString("state")
+            ?: throw IllegalStateException("NetLoop status did not include state.")
         val state = try {
-            State.valueOf(data.getString("state") ?: "ERROR")
-        } catch (_: IllegalArgumentException) {
-            State.ERROR
+            State.valueOf(stateText)
+        } catch (e: IllegalArgumentException) {
+            throw IllegalStateException("Unknown NetLoop state: $stateText", e)
         }
         return Status(
             apiVersion = data.getInt("api_version", -1),
@@ -352,7 +347,6 @@ class NetLoopPluginManager(
             nodeId = data.getString("node_id")?.takeIf { it.isNotBlank() },
             primaryOverlayAddress = data.getString("primary_overlay_address")
                 ?.takeIf { it.isNotBlank() },
-            lastError = data.getString("last_error")?.takeIf { it.isNotBlank() },
         )
     }
 

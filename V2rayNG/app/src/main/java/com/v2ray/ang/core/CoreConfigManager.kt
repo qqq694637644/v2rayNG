@@ -53,11 +53,13 @@ object CoreConfigManager {
      * Build the dedicated NetLoop runtime configuration.
      *
      * This deliberately does not build a normal profile first. NetLoop mode
-     * owns final egress, so no user routing rule, alternate outbound, direct
-     * route, block rule, balancer, or selected remote profile is inherited.
+     * owns final egress, so no user direct/proxy routing rule, alternate
+     * outbound, balancer, or selected remote profile is inherited. Explicit
+     * block rules are the only user routing rules preserved before catch-all.
      */
     fun getNetLoopConfig(context: Context): ConfigResult {
         return try {
+            val useHevTun = SettingsManager.isUsingHevTun()
             val v2rayConfig = initV2rayConfig(context)
             val blockOutbound = v2rayConfig.outbounds.firstOrNull {
                 it.tag == AppConfig.TAG_BLOCKED && it.protocol == "blackhole"
@@ -67,7 +69,11 @@ object CoreConfigManager {
                 MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
 
             configureInbounds(v2rayConfig)
-            v2rayConfig.inbounds.removeIf { it.protocol == "http" }
+            v2rayConfig.inbounds.removeIf { inbound ->
+                inbound.protocol == "http"
+                        || (useHevTun && inbound.protocol == "tun")
+                        || (!useHevTun && inbound.protocol == "socks")
+            }
             v2rayConfig.inbounds.forEach { inbound ->
                 inbound.sniffing?.destOverride?.removeAll { it == "fakedns" }
                 if (inbound.protocol == "socks") {
@@ -117,7 +123,7 @@ object CoreConfigManager {
             applySpeedDisabled(v2rayConfig)
 
             val content = JsonUtil.toJsonPretty(v2rayConfig) ?: ""
-            validateSerializedNetLoopConfig(content)
+            validateSerializedNetLoopConfig(content, useHevTun)
 
             ConfigResult(
                 status = true,
@@ -134,9 +140,30 @@ object CoreConfigManager {
         }
     }
 
-    private fun validateSerializedNetLoopConfig(content: String) {
+    private fun validateSerializedNetLoopConfig(content: String, useHevTun: Boolean) {
         val config = JsonUtil.fromJson(content, V2rayConfig::class.java)
             ?: error("NetLoop runtime config did not round-trip through JSON.")
+
+        val socksInbounds = config.inbounds.filter { it.protocol == "socks" }
+        val tunInbounds = config.inbounds.filter { it.protocol == "tun" }
+        if (useHevTun) {
+            require(tunInbounds.isEmpty()) {
+                "NetLoop HEV mode must not contain an Xray tun inbound."
+            }
+            require(socksInbounds.size == 1
+                    && socksInbounds.single().listen == AppConfig.LOOPBACK
+                    && socksInbounds.single().port == NetLoopSettings.XRAY_INTERNAL_SOCKS_PORT
+                    && socksInbounds.single().settings?.udp == true) {
+                "NetLoop HEV mode requires the fixed internal Xray SOCKS inbound."
+            }
+        } else {
+            require(tunInbounds.size == 1) {
+                "NetLoop Xray TUN mode requires exactly one tun inbound."
+            }
+            require(socksInbounds.isEmpty()) {
+                "NetLoop Xray TUN mode must not expose the internal HEV SOCKS inbound."
+            }
+        }
 
         require(config.outbounds.size == 2) {
             "NetLoop runtime config must contain only proxy and block outbounds."
@@ -621,14 +648,15 @@ object CoreConfigManager {
     //region some sub function
 
     private fun needTun(): Boolean {
-        return SettingsManager.isVpnMode() && !SettingsManager.isUsingHevTun()
+        return (CoreServiceManager.isNetLoopRuntimeActive() || SettingsManager.isVpnMode())
+                && !SettingsManager.isUsingHevTun()
     }
 
     /**
      * Configure inbound listeners and related runtime options.
      */
     private fun configureInbounds(v2rayConfig: V2rayConfig) {
-        val vpn = SettingsManager.isVpnMode()
+        val vpn = CoreServiceManager.isNetLoopRuntimeActive() || SettingsManager.isVpnMode()
         val useHev = SettingsManager.isUsingHevTun()
         val forcedByHev = vpn && useHev
         val forcedBySocksRoot = !CoreServiceManager.isNetLoopRuntimeActive()

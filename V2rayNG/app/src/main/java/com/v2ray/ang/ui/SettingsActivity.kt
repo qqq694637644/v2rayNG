@@ -251,16 +251,6 @@ class SettingsActivity : BaseActivity() {
         }
 
         private fun updateNetLoopSettings(enabled: Boolean) {
-            if (enabled) {
-                MmkvManager.encodeSettings(AppConfig.PREF_MODE, VPN)
-                MmkvManager.encodeSettings(AppConfig.PREF_ROOT_MODE_ENABLE, false)
-                MmkvManager.encodeSettings(AppConfig.PREF_ROOT_LAN_SHARING, false)
-                mode?.value = VPN
-                enableRootMode?.isChecked = false
-                lanSharing?.isChecked = false
-                updateMode(VPN)
-            }
-
             netLoopNetworkId?.isEnabled = enabled
             netLoopDefaultExit?.isEnabled = enabled
             netLoopPeers?.isEnabled = enabled
@@ -269,9 +259,24 @@ class SettingsActivity : BaseActivity() {
             lanSharing?.isEnabled = !enabled
             vpnBypassLan?.isEnabled = !enabled
             ipv6Enabled?.isEnabled = !enabled
+            localDns?.isEnabled = !enabled && mode?.value == VPN
+            fakeDns?.isEnabled = !enabled && localDns?.isChecked == true
+            appendHttpProxy?.isEnabled = !enabled && mode?.value == VPN
+            vpnDns?.isEnabled = !enabled && mode?.value == VPN
+            enableLocalProxy?.isEnabled = !enabled
+            socksPort?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
+            dynamicSocksPort?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
+            socksUsername?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
+            socksPassword?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
+            socksEnableUdp?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
             if (!enabled) {
                 updateMode(MmkvManager.decodeSettingsString(AppConfig.PREF_MODE, VPN))
                 netLoopStatus?.summary = getString(R.string.summary_netloop_disabled)
+            } else {
+                useHevTun?.isEnabled = true
+                updateHevTunSettings(
+                    MmkvManager.decodeSettingsBool(AppConfig.PREF_USE_HEV_TUNNEL, true)
+                )
             }
         }
 
@@ -294,7 +299,7 @@ class SettingsActivity : BaseActivity() {
                         node,
                         address,
                     )
-                    status.lastError?.let { "$base · $it" } ?: base
+                    base
                 } catch (e: Exception) {
                     e.message ?: e.javaClass.simpleName
                 }
@@ -302,7 +307,8 @@ class SettingsActivity : BaseActivity() {
         }
 
         private fun updateMode(value: String?) {
-            val vpn = value == VPN
+            val netLoop = MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)
+            val vpn = netLoop || value == VPN
             localDns?.isEnabled = vpn
             fakeDns?.isEnabled = vpn
             appendHttpProxy?.isEnabled = vpn
@@ -323,9 +329,12 @@ class SettingsActivity : BaseActivity() {
                 updateHevTunSettings(
                     MmkvManager.decodeSettingsBool(
                         AppConfig.PREF_USE_HEV_TUNNEL,
-                        false
+                        true
                     )
                 )
+            }
+            if (netLoop) {
+                updateNetLoopSettings(true)
             }
         }
 
@@ -396,6 +405,21 @@ class SettingsActivity : BaseActivity() {
         private fun updateHevTunSettings(enabled: Boolean) {
             hevTunLogLevel?.isEnabled = enabled
             hevTunRwTimeout?.isEnabled = enabled
+
+            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)) {
+                // NetLoop HEV mode uses the dedicated internal 127.0.0.1:10808
+                // Xray SOCKS inbound. Do not mutate or expose the user's normal
+                // local-proxy settings just to satisfy the HEV data path.
+                enableLocalProxy?.isEnabled = false
+                socksPort?.isEnabled = false
+                dynamicSocksPort?.isEnabled = false
+                socksUsername?.isEnabled = false
+                socksPassword?.isEnabled = false
+                socksEnableUdp?.isEnabled = false
+                proxySharing?.isEnabled = false
+                appendHttpProxy?.isEnabled = false
+                return
+            }
 
             if (enabled) {
                 if (enableLocalProxy?.isChecked == false) {

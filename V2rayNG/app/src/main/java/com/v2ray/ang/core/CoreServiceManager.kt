@@ -156,12 +156,6 @@ object CoreServiceManager {
 
         val netLoopEnabled = NetLoopSettings.isEnabled()
         val config = if (netLoopEnabled) {
-            require(SettingsManager.isVpnMode()) {
-                "NetLoop mode requires VPN mode."
-            }
-            require(!SettingsManager.isRootMode()) {
-                "NetLoop mode does not support root mode."
-            }
             NetLoopSettings.loadConfig()
             null
         } else {
@@ -187,8 +181,11 @@ object CoreServiceManager {
             selected
         }
 
-        // refresh socks port when enabled dynamic socks port
-        SettingsManager.refreshRuntimeSocksPort()
+        // NetLoop owns fixed internal ports. Normal v2rayNG mode may still use
+        // the dynamic user-facing SOCKS port feature.
+        if (!netLoopEnabled) {
+            SettingsManager.refreshRuntimeSocksPort()
+        }
 
 //        val result = V2rayConfigUtil.getV2rayConfig(context, guid)
 //        if (!result.status) error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
@@ -207,7 +204,7 @@ object CoreServiceManager {
         }
 
         val isRootMode = SettingsManager.isRootMode()
-        if (isRootMode && !RootManager.isRootAvailable()) {
+        if (!netLoopEnabled && isRootMode && !RootManager.isRootAvailable()) {
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: root mode requires root but none available")
             error(context.getString(R.string.toast_root_required))
         }

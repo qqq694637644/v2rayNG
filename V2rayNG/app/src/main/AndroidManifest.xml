@@ -41,6 +41,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <queries>
+        <package android:name="com.libzt.netloop" />
+    </queries>
+
     <application
         android:name=".AngApplication"
         android:allowBackup="true"
