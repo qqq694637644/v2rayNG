@@ -49,7 +49,7 @@ class GroupServerFragment : BaseFragment<FragmentGroupServerBinding>(),
     }
     private val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (SettingsChangeManager.consumeRestartService() && mainViewModel.isRunning.value == true) {
-            ownerActivity.restartV2Ray()
+            ownerActivity.applySettingsServiceChange()
         }
     }
 

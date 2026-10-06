@@ -81,4 +81,4 @@ V2rayNG/
 - **Flavor**: personal fork builds only `playstore`, with application ID `com.v2ray.ang`.
 - **hev-socks5-tunnel**: Optional tun2socks binary. Build with `./compile-hevtun.sh` (requires `NDK_HOME`).
 - **ViewBinding** enabled, no DataBinding.
-- **No CI**, no pre-commit hooks, no lint/format enforcement.
+- **CI**: GitHub Actions provides Android build/package CI; no pre-commit hooks or dedicated lint/format gate.

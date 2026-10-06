@@ -59,7 +59,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
     }
     private val requestActivityLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (SettingsChangeManager.consumeRestartService() && mainViewModel.isRunning.value == true) {
-            restartV2Ray()
+            applySettingsServiceChange()
         }
         if (SettingsChangeManager.consumeSetupGroupTab()) {
             setupGroupTab()
@@ -213,6 +213,22 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
             delay(500)
             startV2Ray()
         }
+    }
+
+    fun applySettingsServiceChange() {
+        if (mainViewModel.isRunning.value != true) {
+            return
+        }
+
+        if (CoreServiceManager.isNetLoopRuntimeActive()) {
+            // NetLoop STOP is cross-process and process-final. Do not race a
+            // fixed-delay START against the old :netloop process teardown.
+            // The user reconnects explicitly after changing NetLoop settings.
+            CoreServiceManager.stopVService(this)
+            return
+        }
+
+        restartV2Ray()
     }
 
     private fun setTestState(content: String?) {

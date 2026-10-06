@@ -442,7 +442,9 @@ object CoreServiceManager {
     /**
      * Measures the connection delay for the current V2Ray configuration.
      * Tests with primary URL first, then falls back to alternative URL if needed.
-     * Also fetches remote IP information if the delay test was successful.
+     * Also fetches remote IP information for normal v2rayNG runtime if the
+     * delay test was successful. NetLoop mode has no local HTTP inbound, so its
+     * exit IP is intentionally not queried through the legacy HTTP proxy path.
      */
     private fun measureV2rayDelay() {
         if (coreController.isRunning == false) {
@@ -476,8 +478,9 @@ object CoreServiceManager {
             }
             MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, result)
 
-            // Only fetch IP info if the delay test was successful
-            if (time >= 0) {
+            // NetLoop keeps only TUN/HEV ingress plus the localhost SOCKS
+            // outbound to NetLoop. Do not probe the removed legacy HTTP proxy.
+            if (!netLoopRuntimeActive && time >= 0) {
                 SpeedtestManager.getRemoteIPInfo()?.let { ip ->
                     MessageUtil.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_SUCCESS, "$result\n$ip")
                 }
