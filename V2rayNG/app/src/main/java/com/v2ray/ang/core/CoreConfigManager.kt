@@ -53,17 +53,13 @@ object CoreConfigManager {
      * Build the dedicated NetLoop runtime configuration.
      *
      * This deliberately does not build a normal profile first. NetLoop mode
-     * owns final egress, so no user direct/proxy routing rule, alternate
-     * outbound, balancer, or selected remote profile is inherited. Explicit
-     * block rules are the only user routing rules preserved before catch-all.
+     * owns final egress, so no user routing rule, alternate outbound,
+     * balancer, or selected remote profile is inherited.
      */
     fun getNetLoopConfig(context: Context): ConfigResult {
         return try {
             val useHevTun = SettingsManager.isUsingHevTun()
             val v2rayConfig = initV2rayConfig(context)
-            val blockOutbound = v2rayConfig.outbounds.firstOrNull {
-                it.tag == AppConfig.TAG_BLOCKED && it.protocol == "blackhole"
-            } ?: error("NetLoop runtime template is missing the block outbound.")
             v2rayConfig.remarks = "NetLoop"
             v2rayConfig.log.loglevel =
                 MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
@@ -75,7 +71,11 @@ object CoreConfigManager {
                         || (!useHevTun && inbound.protocol == "socks")
             }
             v2rayConfig.inbounds.forEach { inbound ->
-                inbound.sniffing?.destOverride?.removeAll { it == "fakedns" }
+                inbound.sniffing?.apply {
+                    enabled = false
+                    destOverride.clear()
+                    routeOnly = false
+                }
                 if (inbound.protocol == "socks") {
                     inbound.listen = AppConfig.LOOPBACK
                     inbound.port = NetLoopSettings.XRAY_INTERNAL_SOCKS_PORT
@@ -100,18 +100,17 @@ object CoreConfigManager {
                     streamSettings = null,
                     mux = null,
                 ),
-                blockOutbound,
             )
 
             v2rayConfig.routing.domainStrategy = "AsIs"
             v2rayConfig.routing.domainMatcher = null
             v2rayConfig.routing.balancers = null
-            v2rayConfig.routing.rules = ArrayList(buildNetLoopBlockRules(context)).apply {
-                add(V2rayConfig.RoutingBean.RulesBean(
+            v2rayConfig.routing.rules = arrayListOf(
+                V2rayConfig.RoutingBean.RulesBean(
                     network = "tcp,udp",
                     outboundTag = AppConfig.TAG_PROXY,
-                ))
-            }
+                )
+            )
 
             // Android's VPN DNS packets are ordinary captured UDP/TCP traffic
             // in NetLoop mode and follow the same SOCKS outbound. Do not add a
@@ -146,6 +145,9 @@ object CoreConfigManager {
 
         val socksInbounds = config.inbounds.filter { it.protocol == "socks" }
         val tunInbounds = config.inbounds.filter { it.protocol == "tun" }
+        require(config.inbounds.all { it.sniffing?.enabled != true }) {
+            "NetLoop runtime inbounds must have sniffing disabled."
+        }
         if (useHevTun) {
             require(tunInbounds.isEmpty()) {
                 "NetLoop HEV mode must not contain an Xray tun inbound."
@@ -165,8 +167,8 @@ object CoreConfigManager {
             }
         }
 
-        require(config.outbounds.size == 2) {
-            "NetLoop runtime config must contain only proxy and block outbounds."
+        require(config.outbounds.size == 1) {
+            "NetLoop runtime config must contain only the NetLoop proxy outbound."
         }
         val outbound = config.outbounds.firstOrNull { it.tag == AppConfig.TAG_PROXY }
             ?: error("NetLoop runtime proxy outbound is missing.")
@@ -183,20 +185,10 @@ object CoreConfigManager {
         require(config.routing.balancers.isNullOrEmpty()) {
             "NetLoop runtime config must not contain balancers."
         }
-        require(config.outbounds.any {
-            it.tag == AppConfig.TAG_BLOCKED && it.protocol == "blackhole"
-        }) {
-            "NetLoop runtime block outbound is missing."
+        require(config.routing.rules.size == 1) {
+            "NetLoop runtime config must contain exactly one catch-all routing rule."
         }
-        require(config.routing.rules.isNotEmpty()) {
-            "NetLoop runtime config must contain the catch-all routing rule."
-        }
-        require(config.routing.rules.dropLast(1).all {
-            it.outboundTag == AppConfig.TAG_BLOCKED && it.balancerTag == null
-        }) {
-            "NetLoop runtime may preserve only block rules before the catch-all."
-        }
-        val rule = config.routing.rules.last()
+        val rule = config.routing.rules.single()
         require(rule.outboundTag == AppConfig.TAG_PROXY
                 && rule.balancerTag == null
                 && rule.network == "tcp,udp"
@@ -215,39 +207,6 @@ object CoreConfigManager {
         require(config.observatory == null && config.burstObservatory == null) {
             "NetLoop runtime config must not contain observatory-driven routing."
         }
-    }
-
-    private fun buildNetLoopBlockRules(context: Context): List<V2rayConfig.RoutingBean.RulesBean> {
-        return MmkvManager.decodeRoutingRulesets()
-            .orEmpty()
-            .asSequence()
-            .filter { it.enabled && it.outboundTag == AppConfig.TAG_BLOCKED }
-            .mapNotNull { item ->
-                JsonUtil.fromJson(
-                    JsonUtil.toJson(item),
-                    V2rayConfig.RoutingBean.RulesBean::class.java,
-                )
-            }
-            .onEach { rule ->
-                rule.ip = rule.ip?.map { ip ->
-                    when (ip) {
-                        AppConfig.GEOIP_CN -> "ext:${AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT}:cn"
-                        AppConfig.GEOIP_PRIVATE -> "ext:${AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT}:private"
-                        else -> ip
-                    }
-                }
-                if (SettingsManager.canUseProcessRouting()) {
-                    rule.process = rule.process
-                        ?.takeIf { it.isNotEmpty() }
-                        ?.let { PackageUidResolver.packageNamesToUids(context, it) }
-                        ?.ifEmpty { null }
-                } else {
-                    rule.process = null
-                }
-                rule.outboundTag = AppConfig.TAG_BLOCKED
-                rule.balancerTag = null
-            }
-            .toList()
     }
 
     /**

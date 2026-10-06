@@ -4,7 +4,7 @@
 
 ```sh
 cd V2rayNG
-./gradlew assembleFdroidDebug    # or assemblePlaystoreDebug
+./gradlew assemblePlaystoreDebug
 ```
 
 Kotlin 2.4.0, AGP 9.2.1, Gradle Kotlin DSL. No lint/format/typecheck tasks configured.
@@ -78,7 +78,7 @@ V2rayNG/
 - **Core**: Native AAR (`libv2ray`) from [AndroidLibV2rayLite](https://github.com/2dust/AndroidLibV2rayLite) or [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite). Prebuilt `.aar` files go in `app/libs/`.
 - **Services** run in dedicated process `:RunSoLibV2RayDaemon`. `CoreServiceManager` controls start/stop lifecycle.
 - **Two modes**: VPN (`CoreVpnService`, uses `VpnService.Builder`) or proxy-only (`CoreProxyOnlyService`, local SOCKS/HTTP).
-- **Flavors**: `fdroid` (suffix `.fdroid`) and `playstore` (no suffix). ABI version codes differ per flavor.
+- **Flavor**: personal fork builds only `playstore`, with application ID `com.v2ray.ang`.
 - **hev-socks5-tunnel**: Optional tun2socks binary. Build with `./compile-hevtun.sh` (requires `NDK_HOME`).
 - **ViewBinding** enabled, no DataBinding.
 - **No CI**, no pre-commit hooks, no lint/format enforcement.

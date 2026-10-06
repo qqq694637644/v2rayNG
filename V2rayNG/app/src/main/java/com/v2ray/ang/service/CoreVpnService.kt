@@ -276,11 +276,7 @@ class CoreVpnService : VpnService(), ServiceControl {
             builder.addAddress(vpnConfig.ipv6Client, 126)
             builder.addRoute("::", 0)
 
-            SettingsManager.getVpnDnsServers().forEach {
-                if (Utils.isPureIpAddress(it)) {
-                    builder.addDnsServer(it)
-                }
-            }
+            builder.addDnsServer(AppConfig.DNS_VPN)
             return
         }
 

@@ -116,14 +116,17 @@ class SettingsActivity : BaseActivity() {
                     val idx = lp.findIndexOfValue(valueStr)
                     lp.summary = if (idx >= 0) lp.entries[idx] else valueStr
                 }
-                updateMode(valueStr)
+                updateMode(valueStr, netLoopEnabled?.isChecked == true)
                 true
             }
 
             mode?.dialogLayoutResource = R.layout.preference_with_help_link
 
             useHevTun?.setOnPreferenceChangeListener { _, newValue ->
-                updateHevTunSettings(newValue as Boolean)
+                updateHevTunSettings(
+                    newValue as Boolean,
+                    netLoopEnabled?.isChecked == true,
+                )
                 true
             }
 
@@ -222,13 +225,12 @@ class SettingsActivity : BaseActivity() {
 
         override fun onStart() {
             super.onStart()
-            updateHevTunSettings(MmkvManager.decodeSettingsBool(AppConfig.PREF_USE_HEV_TUNNEL, true))
-
-            // Initialize mode-dependent UI states
-            updateMode(MmkvManager.decodeSettingsString(AppConfig.PREF_MODE, VPN))
-
-            // Initialize local proxy state
-            updateEnableLocalProxy(MmkvManager.decodeSettingsBool(AppConfig.PREF_ENABLE_LOCAL_PROXY, true))
+            val netLoop = MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)
+            if (!netLoop) {
+                updateEnableLocalProxy(
+                    MmkvManager.decodeSettingsBool(AppConfig.PREF_ENABLE_LOCAL_PROXY, true)
+                )
+            }
 
             // Initialize mux-dependent UI states
             updateMux(MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false))
@@ -238,7 +240,6 @@ class SettingsActivity : BaseActivity() {
 
             updateDynamicSocksPort(MmkvManager.decodeSettingsBool(AppConfig.PREF_DYNAMIC_SOCKS_PORT, false))
 
-            val netLoop = MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)
             updateNetLoopSettings(netLoop)
             refreshNetLoopStatus(netLoop)
         }
@@ -257,26 +258,13 @@ class SettingsActivity : BaseActivity() {
             mode?.isEnabled = !enabled
             enableRootMode?.isEnabled = !enabled
             lanSharing?.isEnabled = !enabled
-            vpnBypassLan?.isEnabled = !enabled
             ipv6Enabled?.isEnabled = !enabled
-            localDns?.isEnabled = !enabled && mode?.value == VPN
-            fakeDns?.isEnabled = !enabled && localDns?.isChecked == true
-            appendHttpProxy?.isEnabled = !enabled && mode?.value == VPN
-            vpnDns?.isEnabled = !enabled && mode?.value == VPN
-            enableLocalProxy?.isEnabled = !enabled
-            socksPort?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
-            dynamicSocksPort?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
-            socksUsername?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
-            socksPassword?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
-            socksEnableUdp?.isEnabled = !enabled && enableLocalProxy?.isChecked == true
+            updateMode(
+                MmkvManager.decodeSettingsString(AppConfig.PREF_MODE, VPN),
+                enabled,
+            )
             if (!enabled) {
-                updateMode(MmkvManager.decodeSettingsString(AppConfig.PREF_MODE, VPN))
                 netLoopStatus?.summary = getString(R.string.summary_netloop_disabled)
-            } else {
-                useHevTun?.isEnabled = true
-                updateHevTunSettings(
-                    MmkvManager.decodeSettingsBool(AppConfig.PREF_USE_HEV_TUNNEL, true)
-                )
             }
         }
 
@@ -306,35 +294,34 @@ class SettingsActivity : BaseActivity() {
             }
         }
 
-        private fun updateMode(value: String?) {
-            val netLoop = MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)
-            val vpn = netLoop || value == VPN
-            localDns?.isEnabled = vpn
-            fakeDns?.isEnabled = vpn
-            appendHttpProxy?.isEnabled = vpn
+        private fun updateMode(value: String?, netLoopEnabled: Boolean) {
+            val vpn = netLoopEnabled || value == VPN
+            localDns?.isEnabled = vpn && !netLoopEnabled
+            fakeDns?.isEnabled = vpn && !netLoopEnabled
+            appendHttpProxy?.isEnabled = vpn && !netLoopEnabled
 //            localDnsPort?.isEnabled = vpn
-            vpnDns?.isEnabled = vpn
-            vpnBypassLan?.isEnabled = vpn
+            vpnDns?.isEnabled = vpn && !netLoopEnabled
+            vpnBypassLan?.isEnabled = vpn && !netLoopEnabled
             vpnInterfaceAddress?.isEnabled = vpn
             vpnMtu?.isEnabled = vpn
             useHevTun?.isEnabled = vpn
-            updateHevTunSettings(false)
+            updateHevTunSettings(false, netLoopEnabled)
             if (vpn) {
-                updateLocalDns(
-                    MmkvManager.decodeSettingsBool(
-                        AppConfig.PREF_LOCAL_DNS_ENABLED,
-                        false
+                if (!netLoopEnabled) {
+                    updateLocalDns(
+                        MmkvManager.decodeSettingsBool(
+                            AppConfig.PREF_LOCAL_DNS_ENABLED,
+                            false
+                        )
                     )
-                )
+                }
                 updateHevTunSettings(
                     MmkvManager.decodeSettingsBool(
                         AppConfig.PREF_USE_HEV_TUNNEL,
                         true
-                    )
+                    ),
+                    netLoopEnabled,
                 )
-            }
-            if (netLoop) {
-                updateNetLoopSettings(true)
             }
         }
 
@@ -402,11 +389,11 @@ class SettingsActivity : BaseActivity() {
             }
         }
 
-        private fun updateHevTunSettings(enabled: Boolean) {
+        private fun updateHevTunSettings(enabled: Boolean, netLoopEnabled: Boolean) {
             hevTunLogLevel?.isEnabled = enabled
             hevTunRwTimeout?.isEnabled = enabled
 
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)) {
+            if (netLoopEnabled) {
                 // NetLoop HEV mode uses the dedicated internal 127.0.0.1:10808
                 // Xray SOCKS inbound. Do not mutate or expose the user's normal
                 // local-proxy settings just to satisfy the HEV data path.

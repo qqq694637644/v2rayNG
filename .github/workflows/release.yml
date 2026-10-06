@@ -185,8 +185,8 @@ jobs:
           cd "$GITHUB_WORKSPACE/V2rayNG"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod 755 gradlew
-          ./gradlew licenseFdroidReleaseReport
-          ./gradlew assembleRelease \
+          ./gradlew licensePlaystoreReleaseReport
+          ./gradlew assemblePlaystoreRelease \
             -Pandroid.injected.signing.store.file='${{ steps.android_keystore.outputs.keystore_file }}' \
             -Pandroid.injected.signing.store.password="$APP_KEYSTORE_PASSWORD" \
             -Pandroid.injected.signing.key.alias="$APP_KEYSTORE_ALIAS" \
@@ -197,7 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-files
-          find "$GITHUB_WORKSPACE/V2rayNG/app/build/outputs/apk" -type f -path '*/release/*.apk' -print -exec cp '{}' release-files/ \;
+          find "$GITHUB_WORKSPACE/V2rayNG/app/build/outputs/apk/playstore/release" -type f -name '*.apk' -print -exec cp '{}' release-files/ \;
           test -n "$(find release-files -type f -name '*.apk' -print -quit)"
           (cd release-files && sha256sum *.apk > SHA256SUMS.txt)
 
