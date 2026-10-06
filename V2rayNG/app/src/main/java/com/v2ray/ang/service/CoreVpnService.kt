@@ -114,7 +114,10 @@ class CoreVpnService : VpnService(), ServiceControl {
 
         netLoopStartJob?.cancel()
         if (!isStopping) {
-            netLoopManager?.detach()
+            // Observable VPN service destruction owns the companion lifetime.
+            // A hard process kill still cannot be coordinated and is accepted
+            // without adding a lease/watchdog protocol.
+            netLoopManager?.stop()
             netLoopManager = null
         }
         serviceScope.cancel()
@@ -396,6 +399,7 @@ class CoreVpnService : VpnService(), ServiceControl {
             }
         }
 
+        var successfulAllowedApplicationCount = 0
         apps.forEach {
             try {
                 if (bypassApps) {
@@ -404,10 +408,24 @@ class CoreVpnService : VpnService(), ServiceControl {
                 } else {
                     // In proxy mode, only allow the selected apps
                     builder.addAllowedApplication(it)
+                    successfulAllowedApplicationCount++
                 }
             } catch (e: PackageManager.NameNotFoundException) {
+                if (netLoopEnabled && !bypassApps) {
+                    throw IllegalStateException(
+                        "NetLoop VPN allow-list package is not installed: $it",
+                        e,
+                    )
+                }
                 LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to configure app", e)
             }
+        }
+        if (netLoopEnabled && !bypassApps
+            && successfulAllowedApplicationCount == 0
+        ) {
+            throw IllegalStateException(
+                "NetLoop VPN allow-list contains no installed capturable applications."
+            )
         }
     }
 
@@ -545,10 +563,9 @@ class CoreVpnService : VpnService(), ServiceControl {
         serviceScope.launch {
             try {
                 pauseDataPathForNetLoopRecovery()
-                MessageUtil.sendMsg2UI(
-                    this@CoreVpnService,
-                    AppConfig.MSG_STATE_START_FAILURE,
-                    "NetLoop disconnected; attempting one recovery.",
+                LogUtil.w(
+                    AppConfig.TAG,
+                    "NetLoop disconnected; attempting one recovery."
                 )
                 delay(250)
 

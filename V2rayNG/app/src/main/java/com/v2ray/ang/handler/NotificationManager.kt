@@ -30,7 +30,6 @@ object NotificationManager {
     private const val NOTIFICATION_ID = 1
     private const val NOTIFICATION_PENDING_INTENT_CONTENT = 0
     private const val NOTIFICATION_PENDING_INTENT_STOP_V2RAY = 1
-    private const val NOTIFICATION_PENDING_INTENT_RESTART_V2RAY = 2
     private const val NOTIFICATION_ICON_THRESHOLD = 3000
     private const val QUERY_INTERVAL_MS = 3000L
 
@@ -77,11 +76,6 @@ object NotificationManager {
         stopV2RayIntent.putExtra("key", AppConfig.MSG_STATE_STOP)
         val stopV2RayPendingIntent = PendingIntent.getBroadcast(service, NOTIFICATION_PENDING_INTENT_STOP_V2RAY, stopV2RayIntent, flags)
 
-        val restartV2RayIntent = Intent(AppConfig.BROADCAST_ACTION_SERVICE)
-        restartV2RayIntent.`package` = AppConfig.ANG_PACKAGE
-        restartV2RayIntent.putExtra("key", AppConfig.MSG_STATE_RESTART)
-        val restartV2RayPendingIntent = PendingIntent.getBroadcast(service, NOTIFICATION_PENDING_INTENT_RESTART_V2RAY, restartV2RayIntent, flags)
-
         val channelId =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 createNotificationChannel()
@@ -106,11 +100,6 @@ object NotificationManager {
                 R.drawable.ic_delete_24dp,
                 service.getString(R.string.notification_action_stop_v2ray),
                 stopV2RayPendingIntent
-            )
-            .addAction(
-                R.drawable.ic_restore_24dp,
-                service.getString(R.string.title_service_restart),
-                restartV2RayPendingIntent
             )
 
         //mBuilder?.setDefaults(NotificationCompat.FLAG_ONLY_ALERT_ONCE)

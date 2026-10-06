@@ -545,13 +545,6 @@ object Utils {
     fun isXray(): Boolean = BuildConfig.APPLICATION_ID.startsWith("com.v2ray.ang")
 
     /**
-     * Check if it is the Google Play version.
-     *
-     * @return True if the package is Google Play, false otherwise.
-     */
-    fun isGoogleFlavor(): Boolean = BuildConfig.FLAVOR == "playstore"
-
-    /**
      * Converts an InetAddress to its long representation
      *
      * @param ip The InetAddress to convert

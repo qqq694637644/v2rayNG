@@ -614,13 +614,6 @@ object CoreServiceManager {
                     serviceControl.stopService()
                 }
 
-                AppConfig.MSG_STATE_RESTART -> {
-                    LogUtil.i(AppConfig.TAG, "StartCore-Manager: Restart service")
-                    serviceControl.stopService()
-                    Thread.sleep(500L)
-                    startVService(serviceControl.getService())
-                }
-
                 AppConfig.MSG_MEASURE_DELAY -> {
                     measureV2rayDelay()
                 }

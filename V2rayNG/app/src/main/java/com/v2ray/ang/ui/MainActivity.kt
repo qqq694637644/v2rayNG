@@ -205,30 +205,14 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         CoreServiceManager.startVService(this)
     }
 
-    fun restartV2Ray() {
-        if (mainViewModel.isRunning.value == true) {
-            CoreServiceManager.stopVService(this)
-        }
-        lifecycleScope.launch {
-            delay(500)
-            startV2Ray()
-        }
-    }
-
     fun applySettingsServiceChange() {
-        if (mainViewModel.isRunning.value != true) {
-            return
-        }
-
-        if (CoreServiceManager.isNetLoopRuntimeActive()) {
-            // NetLoop STOP is cross-process and process-final. Do not race a
-            // fixed-delay START against the old :netloop process teardown.
-            // The user reconnects explicitly after changing NetLoop settings.
+        if (mainViewModel.isRunning.value == true) {
+            // This personal fork deliberately does not auto-restart after a
+            // settings change. NetLoop STOP is cross-process/process-final,
+            // and keeping one rule for every runtime avoids mirroring daemon
+            // runtime-type state into the UI process.
             CoreServiceManager.stopVService(this)
-            return
         }
-
-        restartV2Ray()
     }
 
     private fun setTestState(content: String?) {
@@ -361,11 +345,6 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         R.id.real_ping_all -> {
             toast(getString(R.string.connection_test_testing_count, mainViewModel.serversCache.count()))
             mainViewModel.testAllRealPing()
-            true
-        }
-
-        R.id.service_restart -> {
-            restartV2Ray()
             true
         }
 

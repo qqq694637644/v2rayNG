@@ -27,6 +27,7 @@ import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.helper.SimpleItemTouchHelperCallback
+import com.v2ray.ang.netloop.NetLoopSettings
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
@@ -242,8 +243,12 @@ class GroupServerFragment : BaseFragment<FragmentGroupServerBinding>(),
             val toPosition = mainViewModel.getPosition(guid)
             adapter.setSelectServer(fromPosition, toPosition)
 
-            if (mainViewModel.isRunning.value == true) {
-                ownerActivity.restartV2Ray()
+            if (mainViewModel.isRunning.value == true
+                && !NetLoopSettings.isEnabled()
+            ) {
+                // Selecting a legacy profile has no effect on an active
+                // NetLoop runtime. Normal mode stops and waits for Connect.
+                com.v2ray.ang.core.CoreServiceManager.stopVService(ownerActivity)
             }
         }
     }
