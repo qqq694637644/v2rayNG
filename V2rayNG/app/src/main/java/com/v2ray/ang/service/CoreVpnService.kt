@@ -24,10 +24,21 @@ import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.netloop.NetLoopPluginManager
+import com.v2ray.ang.netloop.NetLoopSettings
 import com.v2ray.ang.root.RootLanSharing
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.MessageUtil
 import com.v2ray.ang.util.MyContextWrapper
 import com.v2ray.ang.util.Utils
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.lang.ref.SoftReference
 
 @SuppressLint("VpnServicePolicy")
@@ -35,6 +46,13 @@ class CoreVpnService : VpnService(), ServiceControl {
     private lateinit var mInterface: ParcelFileDescriptor
     private var isRunning = false
     private var tun2SocksService: Tun2SocksControl? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var netLoopStartJob: Job? = null
+    private var netLoopManager: NetLoopPluginManager? = null
+    private var netLoopRecoveryAttempted = false
+    private var isStopping = false
+    private var netLoopSessionActive = false
+    private var netLoopSessionConfig: NetLoopSettings.Config? = null
 
     /**destroy
      * Unfortunately registerDefaultNetworkCallback is going to return our VPN interface: https://android.googlesource.com/platform/frameworks/base/+/dda156ab0c5d66ad82bdcf76cda07cbc0a9c8a2e
@@ -92,8 +110,14 @@ class CoreVpnService : VpnService(), ServiceControl {
 //    }
 
     override fun onDestroy() {
-        super.onDestroy()
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service destroyed")
+
+        netLoopStartJob?.cancel()
+        if (!isStopping) {
+            netLoopManager?.detach()
+            netLoopManager = null
+        }
+        serviceScope.cancel()
 
         // Ensure VPN interface is properly closed when the service is destroyed without
         // going through stopAllService() (e.g. when killed unexpectedly). isRunning is
@@ -110,13 +134,28 @@ class CoreVpnService : VpnService(), ServiceControl {
         }
 
         NotificationManager.cancelNotification()
+        CoreServiceManager.setNetLoopRuntimeActive(false)
+        super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received")
+        netLoopSessionActive = NetLoopSettings.isEnabled()
+        if (!netLoopSessionActive) {
+            netLoopSessionConfig = null
+        }
+        CoreServiceManager.setNetLoopRuntimeActive(netLoopSessionActive)
         NotificationManager.showNotification(null)
-        setupVpnService()
-        startService()
+        isStopping = false
+        if (netLoopSessionActive) {
+            netLoopStartJob?.cancel()
+            netLoopStartJob = serviceScope.launch {
+                startNetLoopVpn()
+            }
+        } else {
+            setupVpnService()
+            startService()
+        }
         return START_STICKY
         //return super.onStartCommand(intent, flags, startId)
     }
@@ -132,16 +171,25 @@ class CoreVpnService : VpnService(), ServiceControl {
         }
         if (!CoreServiceManager.startCoreLoop(mInterface)) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
-            stopAllService()
+            if (netLoopSessionActive) {
+                failNetLoopStartup(
+                    IllegalStateException("Failed to start Xray for NetLoop mode."),
+                    stopPlugin = true,
+                )
+            } else {
+                stopAllService()
+            }
             return
         }
 
         // Start LAN sharing if enabled in settings
-        RootLanSharing.startClientSharing(this)
+        if (!netLoopSessionActive) {
+            RootLanSharing.startClientSharing(this)
+        }
     }
 
     override fun stopService() {
-        stopAllService(true)
+        stopAllService(isForced = true, stopNetLoop = true)
     }
 
     override fun vpnProtect(socket: Int): Boolean {
@@ -221,6 +269,21 @@ class CoreVpnService : VpnService(), ServiceControl {
      */
     private fun configureNetworkSettings(builder: Builder) {
         val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
+        if (netLoopSessionActive) {
+            builder.setMtu(SettingsManager.getVpnMtu())
+            builder.addAddress(vpnConfig.ipv4Client, 30)
+            builder.addRoute("0.0.0.0", 0)
+            builder.addAddress(vpnConfig.ipv6Client, 126)
+            builder.addRoute("::", 0)
+
+            SettingsManager.getVpnDnsServers().forEach {
+                if (Utils.isPureIpAddress(it)) {
+                    builder.addDnsServer(it)
+                }
+            }
+            return
+        }
+
         val bypassLan = SettingsManager.routingRulesetsBypassLan()
 
         // Configure IPv4 settings
@@ -279,7 +342,9 @@ class CoreVpnService : VpnService(), ServiceControl {
         // Android Q (API 29) and above: Configure metering and HTTP proxy
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_APPEND_HTTP_PROXY)) {
+            if (!netLoopSessionActive
+                && MmkvManager.decodeSettingsBool(AppConfig.PREF_APPEND_HTTP_PROXY)
+            ) {
                 builder.setHttpProxy(ProxyInfo.buildDirectProxy(LOOPBACK, SettingsManager.getHttpPort()))
             }
         }
@@ -297,23 +362,43 @@ class CoreVpnService : VpnService(), ServiceControl {
      */
     private fun configurePerAppProxy(builder: Builder) {
         val selfPackageName = BuildConfig.APPLICATION_ID
+        val netLoopEnabled = netLoopSessionActive
+        val packagesOutsideVpn = if (netLoopEnabled) {
+            setOf(selfPackageName, NetLoopPluginManager.PACKAGE_NAME)
+        } else {
+            setOf(selfPackageName)
+        }
 
         // If per-app proxy is not enabled, disallow the VPN service's own package and return
         if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PER_APP_PROXY) == false) {
-            builder.addDisallowedApplication(selfPackageName)
+            packagesOutsideVpn.forEach { packageName ->
+                builder.addDisallowedApplication(packageName)
+            }
             return
         }
 
         // If no apps are selected, disallow the VPN service's own package and return
         val apps = MmkvManager.decodeSettingsStringSet(AppConfig.PREF_PER_APP_PROXY_SET)
+            ?.toMutableSet()
         if (apps.isNullOrEmpty()) {
-            builder.addDisallowedApplication(selfPackageName)
+            packagesOutsideVpn.forEach { packageName ->
+                builder.addDisallowedApplication(packageName)
+            }
             return
         }
 
         val bypassApps = MmkvManager.decodeSettingsBool(AppConfig.PREF_BYPASS_APPS)
         // Handle the VPN service's own package according to the mode
-        if (bypassApps) apps.add(selfPackageName) else apps.remove(selfPackageName)
+        if (bypassApps) {
+            apps.addAll(packagesOutsideVpn)
+        } else {
+            apps.removeAll(packagesOutsideVpn)
+            if (netLoopEnabled && apps.isEmpty()) {
+                throw IllegalStateException(
+                    "NetLoop VPN allow-list contains no capturable applications."
+                )
+            }
+        }
 
         apps.forEach {
             try {
@@ -340,7 +425,14 @@ class CoreVpnService : VpnService(), ServiceControl {
                 context = applicationContext,
                 vpnInterface = mInterface,
                 isRunningProvider = { isRunning },
-                restartCallback = { runTun2socks() }
+                restartCallback = { runTun2socks() },
+                forceIpv6 = netLoopSessionActive,
+                socksPortOverride = if (netLoopSessionActive) {
+                    NetLoopSettings.XRAY_INTERNAL_SOCKS_PORT
+                } else {
+                    null
+                },
+                useSocksAuthentication = !netLoopSessionActive,
             )
         } else {
             tun2SocksService = null
@@ -349,7 +441,14 @@ class CoreVpnService : VpnService(), ServiceControl {
         tun2SocksService?.startTun2Socks()
     }
 
-    private fun stopAllService(isForced: Boolean = true) {
+    private fun stopAllService(
+        isForced: Boolean = true,
+        stopNetLoop: Boolean = true,
+    ) {
+        if (isForced) {
+            isStopping = true
+            netLoopStartJob?.cancel()
+        }
 //        val configName = defaultDPreference.getPrefString(PREF_CURR_CONFIG_GUID, "")
 //        val emptyInfo = VpnNetworkInfo()
 //        val info = loadVpnNetworkInfo(configName, emptyInfo)!! + (lastNetworkInfo ?: emptyInfo)
@@ -369,8 +468,17 @@ class CoreVpnService : VpnService(), ServiceControl {
         RootLanSharing.stopClientSharing(this)
 
         CoreServiceManager.stopCoreLoop()
+        if (isForced) {
+            CoreServiceManager.clearNetLoopRecoveryShutdownSuppression()
+        }
+
+        if (stopNetLoop) {
+            netLoopManager?.stop()
+            netLoopManager = null
+        }
 
         if (isForced) {
+            netLoopSessionConfig = null
             //stopSelf has to be called ahead of mInterface.close(). otherwise v2ray core cannot be stooped
             //It's strage but true.
             //This can be verified by putting stopself() behind and call stopLoop and startLoop
@@ -396,6 +504,126 @@ class CoreVpnService : VpnService(), ServiceControl {
                 LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to close interface", e)
             }
         }
+    }
+
+    private suspend fun startNetLoopVpn() {
+        try {
+            val config = NetLoopSettings.loadConfig()
+            netLoopSessionConfig = config
+            val manager = NetLoopPluginManager(this) {
+                handleUnexpectedNetLoopDisconnect()
+            }
+            netLoopManager?.detach()
+            netLoopManager = manager
+            netLoopRecoveryAttempted = false
+
+            val status = manager.startAndWaitReady(config)
+            LogUtil.i(
+                AppConfig.TAG,
+                "NetLoop READY: node=${status.nodeId}, ip=${status.primaryOverlayAddress}"
+            )
+
+            setupVpnService()
+            if (!isRunning) {
+                error("Failed to establish NetLoop VPN interface.")
+            }
+            startService()
+        } catch (_: CancellationException) {
+            throw CancellationException()
+        } catch (e: Exception) {
+            failNetLoopStartup(e, stopPlugin = true)
+        }
+    }
+
+    private fun handleUnexpectedNetLoopDisconnect() {
+        if (isStopping || !netLoopSessionActive) return
+
+        if (netLoopRecoveryAttempted) {
+            failNetLoopRuntime(
+                IllegalStateException("NetLoop control service disconnected after recovery."),
+            )
+            return
+        }
+
+        netLoopRecoveryAttempted = true
+        serviceScope.launch {
+            try {
+                pauseDataPathForNetLoopRecovery()
+                MessageUtil.sendMsg2UI(
+                    this@CoreVpnService,
+                    AppConfig.MSG_STATE_START_FAILURE,
+                    "NetLoop disconnected; attempting one recovery.",
+                )
+                delay(250)
+
+                val manager = netLoopManager
+                    ?: error("NetLoop control manager is unavailable.")
+                val config = netLoopSessionConfig
+                    ?: error("NetLoop session configuration is unavailable.")
+                val status = manager.rebindAndWaitReady(config)
+                LogUtil.i(
+                    AppConfig.TAG,
+                    "NetLoop recovered: node=${status.nodeId}, ip=${status.primaryOverlayAddress}"
+                )
+
+                setupVpnService()
+                if (!isRunning) {
+                    error("Failed to restore NetLoop VPN interface.")
+                }
+                startService()
+                CoreServiceManager.clearNetLoopRecoveryShutdownSuppression()
+            } catch (_: CancellationException) {
+                throw CancellationException()
+            } catch (e: Exception) {
+                failNetLoopRuntime(e)
+            }
+        }
+    }
+
+    private suspend fun pauseDataPathForNetLoopRecovery() {
+        isRunning = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                connectivity.unregisterNetworkCallback(defaultNetworkCallback)
+            } catch (e: Exception) {
+                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Failed to unregister callback", e)
+            }
+        }
+
+        tun2SocksService?.stopTun2Socks()
+        tun2SocksService = null
+        RootLanSharing.stopClientSharing(this)
+        if (!CoreServiceManager.stopCoreLoopForNetLoopRecovery()) {
+            error("Failed to stop Xray for NetLoop recovery.")
+        }
+
+        try {
+            if (::mInterface.isInitialized) {
+                mInterface.close()
+            }
+        } catch (e: Exception) {
+            LogUtil.w(AppConfig.TAG, "Failed to close VPN interface for NetLoop recovery", e)
+        }
+    }
+
+    private fun failNetLoopStartup(error: Exception, stopPlugin: Boolean) {
+        val message = error.message ?: error.javaClass.simpleName
+        LogUtil.e(AppConfig.TAG, "NetLoop startup failed: $message", error)
+        if (stopPlugin) {
+            netLoopManager?.stop()
+            netLoopManager = null
+        }
+        stopAllService(isForced = true, stopNetLoop = false)
+        MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
+    }
+
+    private fun failNetLoopRuntime(error: Exception) {
+        val message = error.message ?: error.javaClass.simpleName
+        LogUtil.e(AppConfig.TAG, "NetLoop runtime failed: $message", error)
+        netLoopManager?.stop()
+        netLoopManager = null
+        stopAllService(isForced = true, stopNetLoop = false)
+        MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
     }
 }
 

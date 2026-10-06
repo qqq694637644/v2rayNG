@@ -46,6 +46,37 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="@string/title_netloop_settings">
+        <CheckBoxPreference
+            android:defaultValue="false"
+            android:key="pref_netloop_enabled"
+            android:summary="@string/summary_pref_netloop_enabled"
+            android:title="@string/title_pref_netloop_enabled" />
+
+        <EditTextPreference
+            android:key="pref_netloop_network_id"
+            android:summary=""
+            android:title="@string/title_pref_netloop_network_id" />
+
+        <EditTextPreference
+            android:key="pref_netloop_default_exit"
+            android:summary=""
+            android:title="@string/title_pref_netloop_default_exit" />
+
+        <Preference
+            android:key="pref_netloop_status"
+            android:selectable="false"
+            android:summary="@string/summary_netloop_disabled"
+            android:title="@string/title_pref_netloop_status" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="@string/title_netloop_advanced">
+        <EditTextPreference
+            android:key="pref_netloop_peers"
+            android:summary=""
+            android:title="@string/title_pref_netloop_peers" />
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="@string/title_vpn_settings">
         <CheckBoxPreference
             android:key="pref_ipv6_enabled"

@@ -35,6 +35,7 @@ class CoreRootService : Service(), ServiceControl {
     override fun onCreate() {
         super.onCreate()
         LogUtil.i(AppConfig.TAG, "StartCore-Root: Service created")
+        CoreServiceManager.setNetLoopRuntimeActive(false)
         CoreServiceManager.serviceControl = SoftReference(this)
     }
 

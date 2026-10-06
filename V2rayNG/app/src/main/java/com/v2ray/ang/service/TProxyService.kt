@@ -16,7 +16,10 @@ class TProxyService(
     private val context: Context,
     private val vpnInterface: ParcelFileDescriptor,
     private val isRunningProvider: () -> Boolean,
-    private val restartCallback: () -> Unit
+    private val restartCallback: () -> Unit,
+    private val forceIpv6: Boolean = false,
+    private val socksPortOverride: Int? = null,
+    private val useSocksAuthentication: Boolean = true,
 ) : Tun2SocksControl {
     companion object {
         @JvmStatic
@@ -58,7 +61,7 @@ class TProxyService(
     }
 
     private fun buildConfig(): String {
-        val socksPort = SettingsManager.getSocksPort()
+        val socksPort = socksPortOverride ?: SettingsManager.getSocksPort()
         val socksUsername = SettingsManager.getSocksUsername()
         val socksPassword = SettingsManager.getSocksPassword()
         val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
@@ -69,7 +72,9 @@ class TProxyService(
             appendLine("  mtu: ${SettingsManager.getVpnMtu()}")
             appendLine("  ipv4: ${vpnConfig.ipv4Client}")
 
-            if (MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED)) {
+            if (forceIpv6
+                || MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED)
+            ) {
                 appendLine("  ipv6: '${vpnConfig.ipv6Client}'")
             }
 
@@ -77,7 +82,10 @@ class TProxyService(
             appendLine("  port: ${socksPort}")
             appendLine("  address: ${AppConfig.LOOPBACK}")
             appendLine("  udp: 'udp'")
-            if (escapedSocksUsername != null && escapedSocksPassword != null) {
+            if (useSocksAuthentication
+                && escapedSocksUsername != null
+                && escapedSocksPassword != null
+            ) {
                 appendLine("  username: '${escapedSocksUsername}'")
                 appendLine("  password: '${escapedSocksPassword}'")
             }

@@ -93,7 +93,10 @@ object NotificationManager {
 
         mBuilder = NotificationCompat.Builder(service, channelId)
             .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(currentConfig?.remarks)
+            .setContentTitle(
+                currentConfig?.remarks
+                    ?: if (CoreServiceManager.isNetLoopRuntimeActive()) "NetLoop" else null
+            )
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setShowWhen(false)

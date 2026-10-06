@@ -202,6 +202,18 @@
     <string name="title_pref_prefer_ipv6">Prefer IPv6</string>
     <string name="summary_pref_prefer_ipv6">Prefer IPv6 addresses when resolving domain names</string>
 
+    <string name="title_netloop_settings">NetLoop</string>
+    <string name="title_netloop_advanced">NetLoop Advanced</string>
+    <string name="title_pref_netloop_enabled">Use NetLoop transport</string>
+    <string name="summary_pref_netloop_enabled">Route captured VPN traffic through NetLoop at 127.0.0.1:1080 and the configured ZeroTier exit. The selected remote profile and normal routing rules are ignored while enabled.</string>
+    <string name="title_pref_netloop_network_id">ZeroTier network ID</string>
+    <string name="title_pref_netloop_default_exit">Default exit Managed IP</string>
+    <string name="title_pref_netloop_peers">Direct peer Managed IPs (optional)</string>
+    <string name="title_pref_netloop_status">NetLoop status</string>
+    <string name="summary_netloop_disabled">Disabled</string>
+    <string name="summary_netloop_not_installed">NetLoop plugin is not installed.</string>
+    <string name="summary_netloop_status_format">%1$s · node %2$s · IP %3$s</string>
+
     <string name="title_pref_remote_dns">Remote DNS (udp/tcp/https/quic)(Optional)</string>
     <string name="summary_pref_remote_dns">DNS</string>
 

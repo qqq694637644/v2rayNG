@@ -197,6 +197,18 @@
     <string name="title_pref_prefer_ipv6">IPv6 优先</string>
     <string name="summary_pref_prefer_ipv6">解析域名时优先使用 IPv6 地址</string>
 
+    <string name="title_netloop_settings">NetLoop</string>
+    <string name="title_netloop_advanced">NetLoop 高级</string>
+    <string name="title_pref_netloop_enabled">使用 NetLoop 传输</string>
+    <string name="summary_pref_netloop_enabled">将 VPN 捕获的流量送入 127.0.0.1:1080，并通过配置的 ZeroTier 出口统一出网。启用后会忽略当前远程节点和普通路由规则。</string>
+    <string name="title_pref_netloop_network_id">ZeroTier 网络 ID</string>
+    <string name="title_pref_netloop_default_exit">默认出口 Managed IP</string>
+    <string name="title_pref_netloop_peers">直连 Peer Managed IP（可选）</string>
+    <string name="title_pref_netloop_status">NetLoop 状态</string>
+    <string name="summary_netloop_disabled">已禁用</string>
+    <string name="summary_netloop_not_installed">未安装 NetLoop 插件。</string>
+    <string name="summary_netloop_status_format">%1$s · 节点 %2$s · IP %3$s</string>
+
     <string name="title_pref_remote_dns">远程 DNS (udp/tcp/https/quic)(可选)</string>
     <string name="summary_pref_remote_dns">DNS</string>
 

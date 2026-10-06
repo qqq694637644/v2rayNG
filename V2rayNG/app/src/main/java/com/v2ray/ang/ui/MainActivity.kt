@@ -31,6 +31,7 @@ import com.v2ray.ang.extension.toast
 import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.MmkvManager
+import com.v2ray.ang.netloop.NetLoopSettings
 import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SubscriptionUpdater
@@ -168,7 +169,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
 
         if (mainViewModel.isRunning.value == true) {
             CoreServiceManager.stopVService(this)
-        } else if (SettingsManager.isVpnMode()) {
+        } else if (NetLoopSettings.isEnabled() || SettingsManager.isVpnMode()) {
             val intent = VpnService.prepare(this)
             if (intent == null) {
                 startV2Ray()
@@ -190,7 +191,9 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
     }
 
     private fun startV2Ray() {
-        if (MmkvManager.getSelectServer().isNullOrEmpty()) {
+        if (!NetLoopSettings.isEnabled()
+            && MmkvManager.getSelectServer().isNullOrEmpty()
+        ) {
             toast(R.string.title_file_chooser)
             return
         }

@@ -15,6 +15,7 @@ import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
+import com.v2ray.ang.netloop.NetLoopSettings
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
@@ -46,6 +47,180 @@ object CoreConfigManager {
                 errorMessage = "Failed to get V2ray config: ${e.message ?: e.javaClass.simpleName}"
             )
         }
+    }
+
+    /**
+     * Build the dedicated NetLoop runtime configuration.
+     *
+     * This deliberately does not build a normal profile first. NetLoop mode
+     * owns final egress, so no user routing rule, alternate outbound, direct
+     * route, block rule, balancer, or selected remote profile is inherited.
+     */
+    fun getNetLoopConfig(context: Context): ConfigResult {
+        return try {
+            val v2rayConfig = initV2rayConfig(context)
+            val blockOutbound = v2rayConfig.outbounds.firstOrNull {
+                it.tag == AppConfig.TAG_BLOCKED && it.protocol == "blackhole"
+            } ?: error("NetLoop runtime template is missing the block outbound.")
+            v2rayConfig.remarks = "NetLoop"
+            v2rayConfig.log.loglevel =
+                MmkvManager.decodeSettingsString(AppConfig.PREF_LOGLEVEL) ?: "warning"
+
+            configureInbounds(v2rayConfig)
+            v2rayConfig.inbounds.removeIf { it.protocol == "http" }
+            v2rayConfig.inbounds.forEach { inbound ->
+                inbound.sniffing?.destOverride?.removeAll { it == "fakedns" }
+                if (inbound.protocol == "socks") {
+                    inbound.listen = AppConfig.LOOPBACK
+                    inbound.port = NetLoopSettings.XRAY_INTERNAL_SOCKS_PORT
+                    inbound.settings?.auth = "noauth"
+                    inbound.settings?.accounts = null
+                    inbound.settings?.udp = true
+                }
+            }
+
+            v2rayConfig.outbounds = arrayListOf(
+                V2rayConfig.OutboundBean(
+                    tag = AppConfig.TAG_PROXY,
+                    protocol = "socks",
+                    settings = V2rayConfig.OutboundBean.OutSettingsBean(
+                        servers = listOf(
+                            V2rayConfig.OutboundBean.OutSettingsBean.ServersBean(
+                                address = NetLoopSettings.SOCKS_HOST,
+                                port = NetLoopSettings.SOCKS_PORT,
+                            )
+                        )
+                    ),
+                    streamSettings = null,
+                    mux = null,
+                ),
+                blockOutbound,
+            )
+
+            v2rayConfig.routing.domainStrategy = "AsIs"
+            v2rayConfig.routing.domainMatcher = null
+            v2rayConfig.routing.balancers = null
+            v2rayConfig.routing.rules = ArrayList(buildNetLoopBlockRules(context)).apply {
+                add(V2rayConfig.RoutingBean.RulesBean(
+                    network = "tcp,udp",
+                    outboundTag = AppConfig.TAG_PROXY,
+                ))
+            }
+
+            // Android's VPN DNS packets are ordinary captured UDP/TCP traffic
+            // in NetLoop mode and follow the same SOCKS outbound. Do not add a
+            // separate Xray DNS/direct path that could bypass the ZeroTier exit.
+            v2rayConfig.dns = null
+            v2rayConfig.fakedns = null
+            v2rayConfig.observatory = null
+            v2rayConfig.burstObservatory = null
+            applySpeedDisabled(v2rayConfig)
+
+            val content = JsonUtil.toJsonPretty(v2rayConfig) ?: ""
+            validateSerializedNetLoopConfig(content)
+
+            ConfigResult(
+                status = true,
+                guid = "netloop",
+                content = content,
+            )
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to build NetLoop runtime config", e)
+            ConfigResult(
+                status = false,
+                guid = "netloop",
+                errorMessage = "Failed to build NetLoop runtime config: ${e.message ?: e.javaClass.simpleName}",
+            )
+        }
+    }
+
+    private fun validateSerializedNetLoopConfig(content: String) {
+        val config = JsonUtil.fromJson(content, V2rayConfig::class.java)
+            ?: error("NetLoop runtime config did not round-trip through JSON.")
+
+        require(config.outbounds.size == 2) {
+            "NetLoop runtime config must contain only proxy and block outbounds."
+        }
+        val outbound = config.outbounds.firstOrNull { it.tag == AppConfig.TAG_PROXY }
+            ?: error("NetLoop runtime proxy outbound is missing.")
+        require(outbound.tag == AppConfig.TAG_PROXY && outbound.protocol == "socks") {
+            "NetLoop runtime outbound must be the proxy-tagged SOCKS outbound."
+        }
+        val servers = outbound.settings?.servers.orEmpty()
+        require(servers.size == 1
+                && servers.single().address == NetLoopSettings.SOCKS_HOST
+                && servers.single().port == NetLoopSettings.SOCKS_PORT) {
+            "NetLoop runtime SOCKS outbound must target 127.0.0.1:1080."
+        }
+
+        require(config.routing.balancers.isNullOrEmpty()) {
+            "NetLoop runtime config must not contain balancers."
+        }
+        require(config.outbounds.any {
+            it.tag == AppConfig.TAG_BLOCKED && it.protocol == "blackhole"
+        }) {
+            "NetLoop runtime block outbound is missing."
+        }
+        require(config.routing.rules.isNotEmpty()) {
+            "NetLoop runtime config must contain the catch-all routing rule."
+        }
+        require(config.routing.rules.dropLast(1).all {
+            it.outboundTag == AppConfig.TAG_BLOCKED && it.balancerTag == null
+        }) {
+            "NetLoop runtime may preserve only block rules before the catch-all."
+        }
+        val rule = config.routing.rules.last()
+        require(rule.outboundTag == AppConfig.TAG_PROXY
+                && rule.balancerTag == null
+                && rule.network == "tcp,udp"
+                && rule.ip.isNullOrEmpty()
+                && rule.domain.isNullOrEmpty()
+                && rule.process.isNullOrEmpty()
+                && rule.port.isNullOrEmpty()
+                && rule.inboundTag.isNullOrEmpty()
+                && rule.protocol.isNullOrEmpty()) {
+            "NetLoop runtime routing must be a single TCP/UDP catch-all to proxy."
+        }
+
+        require(config.dns == null && config.fakedns == null) {
+            "NetLoop runtime config must not create a separate Xray DNS egress path."
+        }
+        require(config.observatory == null && config.burstObservatory == null) {
+            "NetLoop runtime config must not contain observatory-driven routing."
+        }
+    }
+
+    private fun buildNetLoopBlockRules(context: Context): List<V2rayConfig.RoutingBean.RulesBean> {
+        return MmkvManager.decodeRoutingRulesets()
+            .orEmpty()
+            .asSequence()
+            .filter { it.enabled && it.outboundTag == AppConfig.TAG_BLOCKED }
+            .mapNotNull { item ->
+                JsonUtil.fromJson(
+                    JsonUtil.toJson(item),
+                    V2rayConfig.RoutingBean.RulesBean::class.java,
+                )
+            }
+            .onEach { rule ->
+                rule.ip = rule.ip?.map { ip ->
+                    when (ip) {
+                        AppConfig.GEOIP_CN -> "ext:${AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT}:cn"
+                        AppConfig.GEOIP_PRIVATE -> "ext:${AppConfig.GEOIP_ONLY_CN_PRIVATE_DAT}:private"
+                        else -> ip
+                    }
+                }
+                if (SettingsManager.canUseProcessRouting()) {
+                    rule.process = rule.process
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let { PackageUidResolver.packageNamesToUids(context, it) }
+                        ?.ifEmpty { null }
+                } else {
+                    rule.process = null
+                }
+                rule.outboundTag = AppConfig.TAG_BLOCKED
+                rule.balancerTag = null
+            }
+            .toList()
     }
 
     /**
@@ -417,7 +592,10 @@ object CoreConfigManager {
      * Load the base template from cache or assets and parse it.
      */
     private fun initV2rayConfig(configContext: CoreConfigContext): V2rayConfig {
-        val context = configContext.context
+        return initV2rayConfig(configContext.context)
+    }
+
+    private fun initV2rayConfig(context: Context): V2rayConfig {
         val assets: String
         if (needTun()) {
             assets = initConfigCacheWithTun ?: Utils.readTextFromAssets(context, "v2ray_config_with_tun.json")
@@ -453,8 +631,9 @@ object CoreConfigManager {
         val vpn = SettingsManager.isVpnMode()
         val useHev = SettingsManager.isUsingHevTun()
         val forcedByHev = vpn && useHev
-        val forcedBySocksRoot = SettingsManager.isRootMode()
-                || MmkvManager.decodeSettingsBool(AppConfig.PREF_ROOT_LAN_SHARING)
+        val forcedBySocksRoot = !CoreServiceManager.isNetLoopRuntimeActive()
+                && (SettingsManager.isRootMode()
+                || MmkvManager.decodeSettingsBool(AppConfig.PREF_ROOT_LAN_SHARING))
 
         val enableLocalProxy = forcedByHev || forcedBySocksRoot || MmkvManager.decodeSettingsBool(AppConfig.PREF_ENABLE_LOCAL_PROXY, true)
 

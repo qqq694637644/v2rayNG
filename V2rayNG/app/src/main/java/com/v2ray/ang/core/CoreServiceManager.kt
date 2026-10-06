@@ -22,6 +22,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SpeedtestManager
+import com.v2ray.ang.netloop.NetLoopSettings
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.service.CoreProxyOnlyService
 import com.v2ray.ang.service.CoreRootService
@@ -35,10 +36,12 @@ import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.ProcessFinder
 import java.lang.ref.SoftReference
+import java.util.concurrent.atomic.AtomicBoolean
 import java.net.InetSocketAddress
 
 object CoreServiceManager {
@@ -46,6 +49,9 @@ object CoreServiceManager {
     private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
     private val mMsgReceive = ReceiveMessageHandler()
     private var currentConfig: ProfileItem? = null
+    private val suppressServiceStopOnCoreShutdown = AtomicBoolean(false)
+    @Volatile
+    private var netLoopRuntimeActive = false
     private var processFinder: XrayProcessFinder? = null
     private var browserDialer: IDialerService? = null
 
@@ -66,7 +72,9 @@ object CoreServiceManager {
      * @return True if the service was started successfully, false otherwise.
      */
     fun startVServiceFromToggle(context: Context): Boolean {
-        if (MmkvManager.getSelectServer().isNullOrEmpty()) {
+        if (!NetLoopSettings.isEnabled()
+            && MmkvManager.getSelectServer().isNullOrEmpty()
+        ) {
             context.toast(R.string.app_tile_first_use)
             return false
         }
@@ -119,7 +127,17 @@ object CoreServiceManager {
      * Gets the name of the currently running server.
      * @return The name of the running server.
      */
-    fun getRunningServerName() = currentConfig?.remarks.orEmpty()
+    fun getRunningServerName() = if (netLoopRuntimeActive) {
+        "NetLoop"
+    } else {
+        currentConfig?.remarks.orEmpty()
+    }
+
+    fun setNetLoopRuntimeActive(active: Boolean) {
+        netLoopRuntimeActive = active
+    }
+
+    fun isNetLoopRuntimeActive(): Boolean = netLoopRuntimeActive
 
     /**
      * Starts the context service for V2Ray.
@@ -136,24 +154,37 @@ object CoreServiceManager {
             return
         }
 
-        val guid = MmkvManager.getSelectServer()
-            ?: run {
-                LogUtil.e(AppConfig.TAG, "StartCore-Manager: No server selected")
-                error(context.getString(R.string.app_tile_first_use))
+        val netLoopEnabled = NetLoopSettings.isEnabled()
+        val config = if (netLoopEnabled) {
+            require(SettingsManager.isVpnMode()) {
+                "NetLoop mode requires VPN mode."
             }
+            require(!SettingsManager.isRootMode()) {
+                "NetLoop mode does not support root mode."
+            }
+            NetLoopSettings.loadConfig()
+            null
+        } else {
+            val guid = MmkvManager.getSelectServer()
+                ?: run {
+                    LogUtil.e(AppConfig.TAG, "StartCore-Manager: No server selected")
+                    error(context.getString(R.string.app_tile_first_use))
+                }
 
-        val config = MmkvManager.decodeServerConfig(guid)
-            ?: run {
-                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to decode server config")
+            val selected = MmkvManager.decodeServerConfig(guid)
+                ?: run {
+                    LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to decode server config")
+                    error(context.getString(R.string.toast_config_file_invalid))
+                }
+
+            if (!selected.configType.isComplexType()
+                && !Utils.isValidUrl(selected.server)
+                && !Utils.isPureIpAddress(selected.server.orEmpty())
+            ) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Invalid server configuration")
                 error(context.getString(R.string.toast_config_file_invalid))
             }
-
-        if (!config.configType.isComplexType()
-            && !Utils.isValidUrl(config.server)
-            && !Utils.isPureIpAddress(config.server.orEmpty())
-        ) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Manager: Invalid server configuration")
-            error(context.getString(R.string.toast_config_file_invalid))
+            selected
         }
 
         // refresh socks port when enabled dynamic socks port
@@ -162,12 +193,14 @@ object CoreServiceManager {
 //        val result = V2rayConfigUtil.getV2rayConfig(context, guid)
 //        if (!result.status) error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
 
-        if (config.insecure == true) {
+        if (config?.insecure == true) {
             context.toastError(R.string.toast_allow_insecure_deprecated)
             context.toastError(R.string.toast_allow_insecure_deprecated)
         }
 
-        if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PROXY_SHARING)) {
+        if (!netLoopEnabled
+            && MmkvManager.decodeSettingsBool(AppConfig.PREF_PROXY_SHARING)
+        ) {
             context.toast(R.string.toast_warning_pref_proxysharing_short)
         } else {
             context.toast(R.string.toast_services_start)
@@ -179,7 +212,10 @@ object CoreServiceManager {
             error(context.getString(R.string.toast_root_required))
         }
 
-        val intent = if (isRootMode) {
+        val intent = if (netLoopEnabled) {
+            LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting NetLoop VPN service")
+            Intent(context.applicationContext, CoreVpnService::class.java)
+        } else if (isRootMode) {
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting Root service")
             Intent(context.applicationContext, CoreRootService::class.java)
         } else if (SettingsManager.isVpnMode()) {
@@ -237,11 +273,30 @@ object CoreServiceManager {
 
     @Throws(Exception::class)
     private fun doStartCoreLoop(service: Service, vpnInterface: ParcelFileDescriptor?) {
-        val guid = MmkvManager.getSelectServer() ?: error("No server selected")
-        val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
+        val netLoopEnabled = netLoopRuntimeActive
+        val config = if (netLoopEnabled) {
+            null
+        } else {
+            val guid = MmkvManager.getSelectServer() ?: error("No server selected")
+            MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
+        }
 
-        LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
-        val result = CoreConfigManager.getV2rayConfig(service, guid)
+        LogUtil.i(
+            AppConfig.TAG,
+            if (netLoopEnabled) {
+                "StartCore-Manager: Starting core loop for NetLoop"
+            } else {
+                "StartCore-Manager: Starting core loop for ${config?.remarks}"
+            }
+        )
+        val result = if (netLoopEnabled) {
+            CoreConfigManager.getNetLoopConfig(service)
+        } else {
+            CoreConfigManager.getV2rayConfig(
+                service,
+                MmkvManager.getSelectServer() ?: error("No server selected"),
+            )
+        }
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
@@ -255,7 +310,7 @@ object CoreServiceManager {
 
         currentConfig = config
         var tunFd = vpnInterface?.fd ?: 0
-        val dialerAddr = if (currentConfig?.browserDialerMode.isNullOrEmpty()) {
+        val dialerAddr = if (netLoopEnabled || currentConfig?.browserDialerMode.isNullOrEmpty()) {
             ""
         } else {
             "127.0.0.1:${Utils.findRandomFreePort()}"
@@ -276,10 +331,10 @@ object CoreServiceManager {
             browserDialer!!.stop()
             browserDialer = null
         }
-        if (config.browserDialerMode == "OkHttp") {
+        if (!netLoopEnabled && config?.browserDialerMode == "OkHttp") {
             browserDialer = DialerNativeService()
             browserDialer!!.start(service, dialerAddr)
-        } else if (config.browserDialerMode == "WebView") {
+        } else if (!netLoopEnabled && config?.browserDialerMode == "WebView") {
             browserDialer = DialerWebviewService()
             browserDialer!!.start(service, dialerAddr)
         }
@@ -307,14 +362,44 @@ object CoreServiceManager {
             }
         }
 
-        // Close existing browser dialer
+        cleanupStoppedCore(service, notifyUi = true)
+        return true
+    }
+
+    suspend fun stopCoreLoopForNetLoopRecovery(): Boolean {
+        val service = getService() ?: return false
+
+        if (coreController.isRunning) {
+            suppressServiceStopOnCoreShutdown.set(true)
+            try {
+                withContext(Dispatchers.IO) {
+                    coreController.stopLoop()
+                }
+            } catch (e: Exception) {
+                suppressServiceStopOnCoreShutdown.set(false)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "StartCore-Manager: Failed to stop core for NetLoop recovery",
+                    e,
+                )
+                return false
+            }
+        }
+
+        cleanupStoppedCore(service, notifyUi = false)
+        return true
+    }
+
+    private fun cleanupStoppedCore(service: Service, notifyUi: Boolean) {
         CoreNativeManager.reconcileBrowserDialer("")
         if (browserDialer != null) {
             browserDialer!!.stop()
             browserDialer = null
         }
 
-        MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")
+        if (notifyUi) {
+            MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")
+        }
         NotificationManager.cancelNotification()
 
         try {
@@ -322,8 +407,10 @@ object CoreServiceManager {
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to unregister receiver", e)
         }
+    }
 
-        return true
+    fun clearNetLoopRecoveryShutdownSuppression() {
+        suppressServiceStopOnCoreShutdown.set(false)
     }
 
     /**
@@ -427,6 +514,13 @@ object CoreServiceManager {
          * @return 0 for success, any other value for failure.
          */
         override fun shutdown(): Long {
+            if (suppressServiceStopOnCoreShutdown.getAndSet(false)) {
+                LogUtil.i(
+                    AppConfig.TAG,
+                    "StartCore-Manager: Core shutdown kept VPN service alive for NetLoop recovery"
+                )
+                return 0
+            }
             val serviceControl = serviceControl?.get() ?: return -1
             return try {
                 serviceControl.stopService()

@@ -7,6 +7,7 @@ import com.v2ray.ang.AppConfig
 import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SubscriptionUpdater
+import com.v2ray.ang.netloop.NetLoopSettings
 import com.v2ray.ang.util.LogUtil
 
 class BootReceiver : BroadcastReceiver() {
@@ -31,7 +32,9 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
-        if (MmkvManager.getSelectServer().isNullOrEmpty()) {
+        if (!NetLoopSettings.isEnabled()
+            && MmkvManager.getSelectServer().isNullOrEmpty()
+        ) {
             LogUtil.w(AppConfig.TAG, "BootReceiver: No server selected")
             return
         }

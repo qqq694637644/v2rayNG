@@ -19,6 +19,7 @@ class CoreProxyOnlyService : Service(), ServiceControl {
     override fun onCreate() {
         super.onCreate()
         LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Service created")
+        CoreServiceManager.setNetLoopRuntimeActive(false)
         CoreServiceManager.serviceControl = SoftReference(this)
     }
 

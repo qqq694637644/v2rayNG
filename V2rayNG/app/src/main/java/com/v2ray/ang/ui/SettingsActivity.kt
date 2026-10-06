@@ -6,6 +6,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.VPN
@@ -13,6 +14,7 @@ import com.v2ray.ang.R
 import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.helper.MmkvPreferenceDataStore
+import com.v2ray.ang.netloop.NetLoopPluginManager
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.launch
@@ -34,6 +36,7 @@ class SettingsActivity : BaseActivity() {
         private val vpnBypassLan by lazy { findPreference<ListPreference>(AppConfig.PREF_VPN_BYPASS_LAN) }
         private val vpnInterfaceAddress by lazy { findPreference<ListPreference>(AppConfig.PREF_VPN_INTERFACE_ADDRESS_CONFIG_INDEX) }
         private val vpnMtu by lazy { findPreference<EditTextPreference>(AppConfig.PREF_VPN_MTU) }
+        private val ipv6Enabled by lazy { findPreference<CheckBoxPreference>(AppConfig.PREF_IPV6_ENABLED) }
 
         private val mux by lazy { findPreference<CheckBoxPreference>(AppConfig.PREF_MUX_ENABLED) }
         private val muxConcurrency by lazy { findPreference<EditTextPreference>(AppConfig.PREF_MUX_CONCURRENCY) }
@@ -62,6 +65,12 @@ class SettingsActivity : BaseActivity() {
         private val socksEnableUdp by lazy { findPreference<CheckBoxPreference>(AppConfig.PREF_SOCKS_ENABLE_UDP) }
         private val proxySharing by lazy { findPreference<CheckBoxPreference>(AppConfig.PREF_PROXY_SHARING) }
 
+        private val netLoopEnabled by lazy { findPreference<CheckBoxPreference>(AppConfig.PREF_NETLOOP_ENABLED) }
+        private val netLoopNetworkId by lazy { findPreference<EditTextPreference>(AppConfig.PREF_NETLOOP_NETWORK_ID) }
+        private val netLoopDefaultExit by lazy { findPreference<EditTextPreference>(AppConfig.PREF_NETLOOP_DEFAULT_EXIT) }
+        private val netLoopPeers by lazy { findPreference<EditTextPreference>(AppConfig.PREF_NETLOOP_PEERS) }
+        private val netLoopStatus by lazy { findPreference<Preference>("pref_netloop_status") }
+
         override fun onCreatePreferences(bundle: Bundle?, s: String?) {
             // Use MMKV as the storage backend for all Preferences
             // This prevents inconsistencies between SharedPreferences and MMKV
@@ -73,6 +82,13 @@ class SettingsActivity : BaseActivity() {
 
             localDns?.setOnPreferenceChangeListener { _, any ->
                 updateLocalDns(any as Boolean)
+                true
+            }
+
+            netLoopEnabled?.setOnPreferenceChangeListener { _, newValue ->
+                val enabled = newValue as Boolean
+                updateNetLoopSettings(enabled)
+                refreshNetLoopStatus(enabled)
                 true
             }
 
@@ -221,6 +237,68 @@ class SettingsActivity : BaseActivity() {
             updateFragment(MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false))
 
             updateDynamicSocksPort(MmkvManager.decodeSettingsBool(AppConfig.PREF_DYNAMIC_SOCKS_PORT, false))
+
+            val netLoop = MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)
+            updateNetLoopSettings(netLoop)
+            refreshNetLoopStatus(netLoop)
+        }
+
+        override fun onResume() {
+            super.onResume()
+            refreshNetLoopStatus(
+                MmkvManager.decodeSettingsBool(AppConfig.PREF_NETLOOP_ENABLED, false)
+            )
+        }
+
+        private fun updateNetLoopSettings(enabled: Boolean) {
+            if (enabled) {
+                MmkvManager.encodeSettings(AppConfig.PREF_MODE, VPN)
+                MmkvManager.encodeSettings(AppConfig.PREF_ROOT_MODE_ENABLE, false)
+                MmkvManager.encodeSettings(AppConfig.PREF_ROOT_LAN_SHARING, false)
+                mode?.value = VPN
+                enableRootMode?.isChecked = false
+                lanSharing?.isChecked = false
+                updateMode(VPN)
+            }
+
+            netLoopNetworkId?.isEnabled = enabled
+            netLoopDefaultExit?.isEnabled = enabled
+            netLoopPeers?.isEnabled = enabled
+            mode?.isEnabled = !enabled
+            enableRootMode?.isEnabled = !enabled
+            lanSharing?.isEnabled = !enabled
+            vpnBypassLan?.isEnabled = !enabled
+            ipv6Enabled?.isEnabled = !enabled
+            if (!enabled) {
+                updateMode(MmkvManager.decodeSettingsString(AppConfig.PREF_MODE, VPN))
+                netLoopStatus?.summary = getString(R.string.summary_netloop_disabled)
+            }
+        }
+
+        private fun refreshNetLoopStatus(enabled: Boolean) {
+            if (!enabled) return
+            val context = context ?: return
+            if (!NetLoopPluginManager.isInstalled(context)) {
+                netLoopStatus?.summary = getString(R.string.summary_netloop_not_installed)
+                return
+            }
+
+            lifecycleScope.launch {
+                netLoopStatus?.summary = try {
+                    val status = NetLoopPluginManager.queryStatus(requireContext())
+                    val node = status.nodeId ?: "-"
+                    val address = status.primaryOverlayAddress ?: "-"
+                    val base = getString(
+                        R.string.summary_netloop_status_format,
+                        status.state.name,
+                        node,
+                        address,
+                    )
+                    status.lastError?.let { "$base · $it" } ?: base
+                } catch (e: Exception) {
+                    e.message ?: e.javaClass.simpleName
+                }
+            }
         }
 
         private fun updateMode(value: String?) {
