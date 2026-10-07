@@ -40,6 +40,7 @@ class CoreRootService : Service(), ServiceControl {
     private var routingStopped = false
     private var stopRequested = false
     private var stopCoreCompleted = false
+    private var startAccepted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -55,6 +56,11 @@ class CoreRootService : Service(), ServiceControl {
             LogUtil.i(AppConfig.TAG, "StartCore-Root: Ignoring start while stop is completing")
             return START_NOT_STICKY
         }
+        if (startAccepted) {
+            LogUtil.i(AppConfig.TAG, "StartCore-Root: Ignoring duplicate start for this service instance")
+            return START_STICKY
+        }
+        startAccepted = true
 
         // Start the in-process core first (this also posts the foreground notification),
         // then install the root routing off the main thread.

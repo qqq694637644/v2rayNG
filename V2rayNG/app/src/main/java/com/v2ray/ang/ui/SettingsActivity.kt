@@ -255,6 +255,22 @@ class SettingsActivity : BaseActivity() {
             netLoopNetworkId?.isEnabled = enabled
             netLoopDefaultExit?.isEnabled = enabled
             netLoopPeers?.isEnabled = enabled
+            mux?.isEnabled = !enabled
+            fragment?.isEnabled = !enabled
+            if (enabled) {
+                muxConcurrency?.isEnabled = false
+                muxXudpConcurrency?.isEnabled = false
+                muxXudpQuic?.isEnabled = false
+                fragmentPackets?.isEnabled = false
+                fragmentLength?.isEnabled = false
+                fragmentInterval?.isEnabled = false
+                fragmentMaxSplit?.isEnabled = false
+            } else {
+                updateMux(MmkvManager.decodeSettingsBool(AppConfig.PREF_MUX_ENABLED, false))
+                updateFragment(
+                    MmkvManager.decodeSettingsBool(AppConfig.PREF_FRAGMENT_ENABLED, false)
+                )
+            }
             mode?.isEnabled = !enabled
             enableRootMode?.isEnabled = !enabled
             lanSharing?.isEnabled = !enabled

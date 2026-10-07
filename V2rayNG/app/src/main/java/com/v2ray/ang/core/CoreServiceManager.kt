@@ -44,7 +44,6 @@ import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
 import libv2ray.ProcessFinder
 import java.lang.ref.SoftReference
-import java.util.concurrent.atomic.AtomicBoolean
 import java.net.InetSocketAddress
 
 object CoreServiceManager {
@@ -55,7 +54,6 @@ object CoreServiceManager {
     private var receiverService: SoftReference<Service>? = null
     private val coreStopMutex = Mutex()
     private var currentConfig: ProfileItem? = null
-    private val suppressServiceStopOnCoreShutdown = AtomicBoolean(false)
     @Volatile
     private var netLoopRuntimeActive = false
     private var processFinder: XrayProcessFinder? = null
@@ -388,46 +386,31 @@ object CoreServiceManager {
         service: Service,
     ): Boolean {
         if (serviceControl?.get()?.getService() !== service) return true
-        return stopCoreLoopAwaited(
-            reason = "service stop",
-            preserveShutdownSuppression = false,
-        )
+        return stopCoreLoopAwaited(reason = "service stop")
     }
 
     suspend fun stopCoreLoopForNetLoopRecovery(): Boolean {
         getService() ?: return false
-        return stopCoreLoopAwaited(
-            reason = "NetLoop recovery",
-            preserveShutdownSuppression = true,
-        )
+        return stopCoreLoopAwaited(reason = "NetLoop recovery")
     }
 
     suspend fun stopCoreLoopForServiceDestroy(service: Service): Boolean {
         if (serviceControl?.get()?.getService() !== service) return true
-        return stopCoreLoopAwaited(
-            reason = "service destroy",
-            preserveShutdownSuppression = false,
-        )
+        return stopCoreLoopAwaited(reason = "service destroy")
     }
 
     private suspend fun stopCoreLoopAwaited(
         reason: String,
-        preserveShutdownSuppression: Boolean,
     ): Boolean = coreStopMutex.withLock {
         if (coreController.isRunning) {
-            suppressServiceStopOnCoreShutdown.set(true)
             try {
                 withContext(NonCancellable + Dispatchers.IO) {
                     coreController.stopLoop()
                 }
             } catch (e: Exception) {
-                suppressServiceStopOnCoreShutdown.set(false)
                 LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to stop core for $reason", e)
                 return@withLock false
             }
-        }
-        if (!preserveShutdownSuppression) {
-            suppressServiceStopOnCoreShutdown.set(false)
         }
 
         cleanupStoppedCore()
@@ -440,10 +423,6 @@ object CoreServiceManager {
             browserDialer!!.stop()
             browserDialer = null
         }
-    }
-
-    fun clearNetLoopRecoveryShutdownSuppression() {
-        suppressServiceStopOnCoreShutdown.set(false)
     }
 
     /**
@@ -550,21 +529,7 @@ object CoreServiceManager {
          * @return 0 for success, any other value for failure.
          */
         override fun shutdown(): Long {
-            if (suppressServiceStopOnCoreShutdown.getAndSet(false)) {
-                LogUtil.i(
-                    AppConfig.TAG,
-                    "StartCore-Manager: Core shutdown suppressed during controlled stop"
-                )
-                return 0
-            }
-            val serviceControl = serviceControl?.get() ?: return -1
-            return try {
-                serviceControl.stopService()
-                0
-            } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to stop service", e)
-                -1
-            }
+            return 0
         }
 
         /**
@@ -630,11 +595,14 @@ object CoreServiceManager {
             val serviceControl = serviceControl?.get() ?: return
             when (intent?.getIntExtra("key", 0)) {
                 AppConfig.MSG_REGISTER_CLIENT -> {
-                    if (coreController.isRunning) {
-                        MessageUtil.sendMsg2UI(serviceControl.getService(), AppConfig.MSG_STATE_RUNNING, "")
-                    } else {
-                        MessageUtil.sendMsg2UI(serviceControl.getService(), AppConfig.MSG_STATE_NOT_RUNNING, "")
-                    }
+                    // UI RUNNING means the Android service/session exists.
+                    // Xray may intentionally be stopped while NetLoop is
+                    // STARTING or during the one recovery attempt.
+                    MessageUtil.sendMsg2UI(
+                        serviceControl.getService(),
+                        AppConfig.MSG_STATE_RUNNING,
+                        "",
+                    )
                 }
 
                 AppConfig.MSG_UNREGISTER_CLIENT -> {

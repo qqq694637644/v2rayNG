@@ -25,6 +25,7 @@ class CoreProxyOnlyService : Service(), ServiceControl {
     private var stopJob: Job? = null
     private var stopRequested = false
     private var stopCoreCompleted = false
+    private var startAccepted = false
 
     /**
      * Initializes the service.
@@ -50,7 +51,16 @@ class CoreProxyOnlyService : Service(), ServiceControl {
             LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Ignoring start while stop is completing")
             return START_NOT_STICKY
         }
-        CoreServiceManager.startCoreLoop(null)
+        if (startAccepted) {
+            LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Ignoring duplicate start for this service instance")
+            return START_STICKY
+        }
+        startAccepted = true
+        if (!CoreServiceManager.startCoreLoop(null)) {
+            LogUtil.e(AppConfig.TAG, "StartCore-Proxy: core failed to start")
+            stopService()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 

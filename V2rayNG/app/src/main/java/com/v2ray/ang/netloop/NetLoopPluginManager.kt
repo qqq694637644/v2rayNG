@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import android.os.RemoteException
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.AppConfig
 import kotlinx.coroutines.CompletableDeferred
@@ -35,6 +36,7 @@ class NetLoopPluginManager(
         private const val COMMAND_GET_STATUS = 3
         private const val REQUEST_TIMEOUT_MS = 5_000L
         private const val START_TIMEOUT_MS = 125_000L
+        private const val STOP_TIMEOUT_MS = 15_000L
         private const val STATUS_POLL_MS = 250L
 
         fun isInstalled(context: Context): Boolean {
@@ -166,6 +168,50 @@ class NetLoopPluginManager(
         val data = request(COMMAND_GET_STATUS, Bundle())
         requireOk(data)
         return parseStatus(data).also(::requireApiVersion)
+    }
+
+    suspend fun stopAndWaitGone() {
+        expectedRunning = false
+        suppressDisconnect = true
+        try {
+            val target = connect()
+            val binder = target.binder
+            val died = CompletableDeferred<Unit>()
+            val deathRecipient = IBinder.DeathRecipient {
+                died.complete(Unit)
+            }
+
+            try {
+                try {
+                    binder.linkToDeath(deathRecipient, 0)
+                } catch (_: RemoteException) {
+                    detachInternal()
+                    return
+                }
+
+                try {
+                    val response = request(COMMAND_STOP, Bundle())
+                    requireOk(response)
+                } catch (e: Exception) {
+                    if (binder.isBinderAlive) throw e
+                }
+
+                detachInternal()
+                if (binder.isBinderAlive) {
+                    withTimeout(STOP_TIMEOUT_MS) {
+                        died.await()
+                    }
+                }
+            } finally {
+                detachInternal()
+                try {
+                    binder.unlinkToDeath(deathRecipient, 0)
+                } catch (_: Exception) {
+                }
+            }
+        } finally {
+            suppressDisconnect = false
+        }
     }
 
     fun stop() {
