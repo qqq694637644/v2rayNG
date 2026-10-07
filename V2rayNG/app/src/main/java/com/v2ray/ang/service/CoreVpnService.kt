@@ -146,9 +146,10 @@ class CoreVpnService : VpnService(), ServiceControl {
             }
         }
 
-        terminalFailureMessage?.let { message ->
-            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
-        } ?: if (isStopping && (stopCoreCompleted || destroyCoreCompleted)) {
+        val failureMessage = terminalFailureMessage
+        if (failureMessage != null) {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, failureMessage)
+        } else if (isStopping && (stopCoreCompleted || destroyCoreCompleted)) {
             MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_STOP_SUCCESS, "")
         }
         NotificationManager.cancelNotification(this)
