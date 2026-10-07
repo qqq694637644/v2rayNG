@@ -58,7 +58,7 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
         }
     }
     private val requestActivityLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (SettingsChangeManager.consumeRestartService() && mainViewModel.isRunning.value == true) {
+        if (SettingsChangeManager.consumeRestartService()) {
             applySettingsServiceChange()
         }
         if (SettingsChangeManager.consumeSetupGroupTab()) {
@@ -206,13 +206,10 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
     }
 
     fun applySettingsServiceChange() {
-        if (mainViewModel.isRunning.value == true) {
-            // This personal fork deliberately does not auto-restart after a
-            // settings change. NetLoop STOP is cross-process/process-final,
-            // and keeping one rule for every runtime avoids mirroring daemon
-            // runtime-type state into the UI process.
-            CoreServiceManager.stopVService(this)
-        }
+        // Settings changes always request STOP. If no service exists the
+        // broadcast is harmless; if startup or NetLoop recovery is in flight,
+        // the service-lifetime receiver handles it before Xray is running.
+        CoreServiceManager.stopVService(this)
     }
 
     private fun setTestState(content: String?) {
@@ -678,7 +675,6 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
             R.id.settings -> requestActivityLauncher.launch(Intent(this, SettingsActivity::class.java))
             R.id.promotion -> Utils.openUri(this, "${Utils.decode(AppConfig.APP_PROMOTION_URL)}?t=${System.currentTimeMillis()}")
             R.id.logcat -> startActivity(Intent(this, LogcatActivity::class.java))
-            R.id.check_for_update -> startActivity(Intent(this, CheckUpdateActivity::class.java))
             R.id.backup_restore -> requestActivityLauncher.launch(Intent(this, BackupActivity::class.java))
             R.id.about -> startActivity(Intent(this, AboutActivity::class.java))
         }

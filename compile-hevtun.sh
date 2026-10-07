@@ -16,7 +16,7 @@ clear_tmp () {
 }
 trap 'echo -e "Aborted, error $? in command: $BASH_COMMAND"; trap ERR; clear_tmp; exit 1' ERR INT
 
-ABIS="armeabi-v7a arm64-v8a x86 x86_64"
+ABIS="arm64-v8a"
 
 mkdir -p "$TMPDIR/jni"
 pushd "$TMPDIR"
@@ -71,9 +71,6 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/third-part/hev-task-system/include
 LOCAL_CFLAGS += -DFD_SET_DEFINED -DSOCKLEN_T_DEFINED
 LOCAL_CFLAGS += $(VERSION_CFLAGS)
-ifeq ($(TARGET_ARCH_ABI),armeabi-v7a)
-LOCAL_CFLAGS += -mfpu=neon
-endif
 LOCAL_STATIC_LIBRARIES := yaml lwip hev-task-system
 LOCAL_LDFLAGS += -Wl,-z,max-page-size=16384
 LOCAL_LDFLAGS += -Wl,-z,common-page-size=16384

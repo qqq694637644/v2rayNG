@@ -7,6 +7,7 @@ import android.os.IBinder
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.core.CoreServiceManager
+import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.root.RootProxyManager
 import com.v2ray.ang.util.LogUtil
@@ -14,9 +15,12 @@ import com.v2ray.ang.util.MyContextWrapper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import java.lang.ref.SoftReference
 
 /**
@@ -30,17 +34,27 @@ import java.lang.ref.SoftReference
  */
 class CoreRootService : Service(), ServiceControl {
 
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var setupJob: Job? = null
+    private var stopJob: Job? = null
+    private var routingStopped = false
+    private var stopRequested = false
+    private var stopCoreCompleted = false
 
     override fun onCreate() {
         super.onCreate()
         LogUtil.i(AppConfig.TAG, "StartCore-Root: Service created")
         CoreServiceManager.setNetLoopRuntimeActive(false)
         CoreServiceManager.serviceControl = SoftReference(this)
+        CoreServiceManager.registerServiceControlReceiver(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LogUtil.i(AppConfig.TAG, "StartCore-Root: command received")
+        if (stopRequested) {
+            LogUtil.i(AppConfig.TAG, "StartCore-Root: Ignoring start while stop is completing")
+            return START_NOT_STICKY
+        }
 
         // Start the in-process core first (this also posts the foreground notification),
         // then install the root routing off the main thread.
@@ -50,7 +64,7 @@ class CoreRootService : Service(), ServiceControl {
             return START_NOT_STICKY
         }
 
-        setupJob = CoroutineScope(Dispatchers.IO).launch {
+        setupJob = serviceScope.launch(Dispatchers.IO) {
             if (!RootProxyManager.start(this@CoreRootService)) {
                 LogUtil.e(AppConfig.TAG, "StartCore-Root: failed to start root mode, stopping")
                 stopService()
@@ -61,17 +75,22 @@ class CoreRootService : Service(), ServiceControl {
     }
 
     override fun onDestroy() {
+        val destroyCoreCompleted = runBlocking {
+            stopRootRouting()
+            CoreServiceManager.stopCoreLoopForServiceDestroy(this@CoreRootService)
+        }
+        CoreServiceManager.unregisterServiceControlReceiver(this)
+        if (stopRequested && (stopCoreCompleted || destroyCoreCompleted)) {
+            com.v2ray.ang.util.MessageUtil.sendMsg2UI(
+                this,
+                AppConfig.MSG_STATE_STOP_SUCCESS,
+                "",
+            )
+        }
+        NotificationManager.cancelNotification(this)
+        CoreServiceManager.clearServiceControl(this)
+        serviceScope.cancel()
         super.onDestroy()
-        // Wait for any in-flight async setup to finish before tearing down. The rules are
-        // installed off the main thread and can take seconds (the setup script waits for the
-        // tun to appear); if a stop arrives during that window, teardown would run first and
-        // the setup would then re-install the rules + tun pointing at a now-dead core,
-        // blackholing all traffic until the next start/stop cycle clears it.
-        runBlocking { setupJob?.cancelAndJoin() }
-        // Remove routing rules BEFORE stopping the core so traffic is never redirected
-        // to a dead listener. Synchronous on purpose — leaving rules behind breaks the net.
-        RootProxyManager.stop(this)
-        CoreServiceManager.stopCoreLoop()
     }
 
     override fun getService(): Service = this
@@ -81,7 +100,25 @@ class CoreRootService : Service(), ServiceControl {
     }
 
     override fun stopService() {
-        stopSelf()
+        if (stopJob?.isActive == true) return
+        stopRequested = true
+        stopJob = serviceScope.launch {
+            stopRootRouting()
+            stopCoreCompleted = CoreServiceManager.stopCoreLoopForServiceStop(this@CoreRootService)
+            if (!stopCoreCompleted) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Root: Failed to complete core stop")
+            }
+            stopSelf()
+        }
+    }
+
+    private suspend fun stopRootRouting() {
+        if (routingStopped) return
+        setupJob?.cancelAndJoin()
+        withContext(Dispatchers.IO) {
+            RootProxyManager.stop(this@CoreRootService)
+        }
+        routingStopped = true
     }
 
     override fun vpnProtect(socket: Int): Boolean = true

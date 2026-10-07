@@ -35,7 +35,10 @@ import com.v2ray.ang.util.MessageUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
 import libv2ray.CoreController
@@ -48,6 +51,9 @@ object CoreServiceManager {
 
     private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
     private val mMsgReceive = ReceiveMessageHandler()
+    private val receiverLock = Any()
+    private var receiverService: SoftReference<Service>? = null
+    private val coreStopMutex = Mutex()
     private var currentConfig: ProfileItem? = null
     private val suppressServiceStopOnCoreShutdown = AtomicBoolean(false)
     @Volatile
@@ -65,6 +71,49 @@ object CoreServiceManager {
                 coreController.registerProcessFinder(processFinder)
             }
         }
+
+    fun registerServiceControlReceiver(service: Service) {
+        synchronized(receiverLock) {
+            val current = receiverService?.get()
+            if (current === service) return
+
+            if (current != null) {
+                try {
+                    current.unregisterReceiver(mMsgReceive)
+                } catch (e: Exception) {
+                    LogUtil.w(AppConfig.TAG, "StartCore-Manager: Failed to replace service receiver", e)
+                }
+            }
+
+            val filter = IntentFilter(AppConfig.BROADCAST_ACTION_SERVICE).apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            ContextCompat.registerReceiver(service, mMsgReceive, filter, Utils.receiverFlags())
+            receiverService = SoftReference(service)
+        }
+    }
+
+    fun unregisterServiceControlReceiver(service: Service) {
+        synchronized(receiverLock) {
+            if (receiverService?.get() !== service) return
+            try {
+                service.unregisterReceiver(mMsgReceive)
+            } catch (e: Exception) {
+                LogUtil.w(AppConfig.TAG, "StartCore-Manager: Failed to unregister service receiver", e)
+            } finally {
+                receiverService = null
+            }
+        }
+    }
+
+    fun clearServiceControl(service: Service) {
+        val current = serviceControl?.get() ?: return
+        if (current.getService() === service) {
+            serviceControl = null
+        }
+    }
 
     /**
      * Starts the V2Ray service from a toggle action.
@@ -263,7 +312,7 @@ object CoreServiceManager {
             val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: $message", e)
             MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
-            NotificationManager.cancelNotification()
+            NotificationManager.cancelNotification(service)
             return false
         }
     }
@@ -298,12 +347,6 @@ object CoreServiceManager {
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }
-
-        val mFilter = IntentFilter(AppConfig.BROADCAST_ACTION_SERVICE)
-        mFilter.addAction(Intent.ACTION_SCREEN_ON)
-        mFilter.addAction(Intent.ACTION_SCREEN_OFF)
-        mFilter.addAction(Intent.ACTION_USER_PRESENT)
-        ContextCompat.registerReceiver(service, mMsgReceive, mFilter, Utils.receiverFlags())
 
         currentConfig = config
         var tunFd = vpnInterface?.fd ?: 0
@@ -341,68 +384,61 @@ object CoreServiceManager {
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
     }
 
-    /**
-     * Stops the V2Ray core service.
-     * Unregisters broadcast receivers, stops notifications, and shuts down plugins.
-     * @return True if the core was stopped successfully, false otherwise.
-     */
-    fun stopCoreLoop(): Boolean {
-        val service = getService() ?: return false
-
-        if (coreController.isRunning) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    coreController.stopLoop()
-                } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to stop V2Ray loop", e)
-                }
-            }
-        }
-
-        cleanupStoppedCore(service, notifyUi = true)
-        return true
+    suspend fun stopCoreLoopForServiceStop(
+        service: Service,
+    ): Boolean {
+        if (serviceControl?.get()?.getService() !== service) return true
+        return stopCoreLoopAwaited(
+            reason = "service stop",
+            preserveShutdownSuppression = false,
+        )
     }
 
     suspend fun stopCoreLoopForNetLoopRecovery(): Boolean {
-        val service = getService() ?: return false
+        getService() ?: return false
+        return stopCoreLoopAwaited(
+            reason = "NetLoop recovery",
+            preserveShutdownSuppression = true,
+        )
+    }
 
+    suspend fun stopCoreLoopForServiceDestroy(service: Service): Boolean {
+        if (serviceControl?.get()?.getService() !== service) return true
+        return stopCoreLoopAwaited(
+            reason = "service destroy",
+            preserveShutdownSuppression = false,
+        )
+    }
+
+    private suspend fun stopCoreLoopAwaited(
+        reason: String,
+        preserveShutdownSuppression: Boolean,
+    ): Boolean = coreStopMutex.withLock {
         if (coreController.isRunning) {
             suppressServiceStopOnCoreShutdown.set(true)
             try {
-                withContext(Dispatchers.IO) {
+                withContext(NonCancellable + Dispatchers.IO) {
                     coreController.stopLoop()
                 }
             } catch (e: Exception) {
                 suppressServiceStopOnCoreShutdown.set(false)
-                LogUtil.e(
-                    AppConfig.TAG,
-                    "StartCore-Manager: Failed to stop core for NetLoop recovery",
-                    e,
-                )
-                return false
+                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to stop core for $reason", e)
+                return@withLock false
             }
         }
+        if (!preserveShutdownSuppression) {
+            suppressServiceStopOnCoreShutdown.set(false)
+        }
 
-        cleanupStoppedCore(service, notifyUi = false)
-        return true
+        cleanupStoppedCore()
+        true
     }
 
-    private fun cleanupStoppedCore(service: Service, notifyUi: Boolean) {
+    private fun cleanupStoppedCore() {
         CoreNativeManager.reconcileBrowserDialer("")
         if (browserDialer != null) {
             browserDialer!!.stop()
             browserDialer = null
-        }
-
-        if (notifyUi) {
-            MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_STOP_SUCCESS, "")
-        }
-        NotificationManager.cancelNotification()
-
-        try {
-            service.unregisterReceiver(mMsgReceive)
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to unregister receiver", e)
         }
     }
 
@@ -517,7 +553,7 @@ object CoreServiceManager {
             if (suppressServiceStopOnCoreShutdown.getAndSet(false)) {
                 LogUtil.i(
                     AppConfig.TAG,
-                    "StartCore-Manager: Core shutdown kept VPN service alive for NetLoop recovery"
+                    "StartCore-Manager: Core shutdown suppressed during controlled stop"
                 )
                 return 0
             }

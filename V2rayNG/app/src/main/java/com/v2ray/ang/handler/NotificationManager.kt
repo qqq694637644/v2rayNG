@@ -24,6 +24,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.lang.ref.SoftReference
 import kotlin.math.min
 
 object NotificationManager {
@@ -37,6 +38,8 @@ object NotificationManager {
     private var mBuilder: NotificationCompat.Builder? = null
     private var speedNotificationJob: Job? = null
     private var mNotificationManager: NotificationManager? = null
+    private val notificationLock = Any()
+    private var notificationService: SoftReference<Service>? = null
 
     /**
      * Starts the speed notification.
@@ -85,39 +88,51 @@ object NotificationManager {
                 ""
             }
 
-        mBuilder = NotificationCompat.Builder(service, channelId)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(
-                currentConfig?.remarks
-                    ?: if (CoreServiceManager.isNetLoopRuntimeActive()) "NetLoop" else null
-            )
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setOngoing(true)
-            .setShowWhen(false)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(contentPendingIntent)
-            .addAction(
-                R.drawable.ic_delete_24dp,
-                service.getString(R.string.notification_action_stop_v2ray),
-                stopV2RayPendingIntent
-            )
+        synchronized(notificationLock) {
+            if (notificationService?.get() !== service) {
+                speedNotificationJob?.cancel()
+                speedNotificationJob = null
+                mNotificationManager = null
+            }
+            notificationService = SoftReference(service)
+            mBuilder = NotificationCompat.Builder(service, channelId)
+                .setSmallIcon(R.drawable.ic_stat_name)
+                .setContentTitle(
+                    currentConfig?.remarks
+                        ?: if (CoreServiceManager.isNetLoopRuntimeActive()) "NetLoop" else null
+                )
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(contentPendingIntent)
+                .addAction(
+                    R.drawable.ic_delete_24dp,
+                    service.getString(R.string.notification_action_stop_v2ray),
+                    stopV2RayPendingIntent
+                )
 
         //mBuilder?.setDefaults(NotificationCompat.FLAG_ONLY_ALERT_ONCE)
 
-        service.startForeground(NOTIFICATION_ID, mBuilder?.build())
+            service.startForeground(NOTIFICATION_ID, mBuilder?.build())
+        }
     }
 
     /**
      * Cancels the notification.
      */
-    fun cancelNotification() {
-        val service = getService() ?: return
-        service.stopForeground(Service.STOP_FOREGROUND_REMOVE)
+    fun cancelNotification(service: Service? = getService()) {
+        service ?: return
+        synchronized(notificationLock) {
+            if (notificationService?.get() !== service) return
+            service.stopForeground(Service.STOP_FOREGROUND_REMOVE)
 
-        mBuilder = null
-        speedNotificationJob?.cancel()
-        speedNotificationJob = null
-        mNotificationManager = null
+            mBuilder = null
+            speedNotificationJob?.cancel()
+            speedNotificationJob = null
+            mNotificationManager = null
+            notificationService = null
+        }
     }
 
     /**
@@ -177,7 +192,7 @@ object NotificationManager {
      */
     private fun getNotificationManager(): NotificationManager? {
         if (mNotificationManager == null) {
-            val service = getService() ?: return null
+            val service = notificationService?.get() ?: getService() ?: return null
             mNotificationManager = service.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         }
         return mNotificationManager

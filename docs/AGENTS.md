@@ -48,7 +48,6 @@ V2rayNG/
         SpeedtestManager.kt
         SubscriptionUpdater.kt
         WebDavManager.kt
-        UpdateCheckerManager.kt
         CertificateFingerprintManager.kt
         SettingsChangeManager.kt
       ui/                         # activities, adapters, fragments
@@ -61,7 +60,7 @@ V2rayNG/
         SubSettingActivity.kt / SubEditActivity.kt
         UserAssetActivity.kt / UserAssetUrlActivity.kt
         TaskerActivity.kt / UrlSchemeActivity.kt
-        BackupActivity.kt / CheckUpdateActivity.kt / AboutActivity.kt
+        BackupActivity.kt / AboutActivity.kt
       fmt/                        # protocol URL parsers (VMESS, VLESS, TROJAN, SS, SOCKS, etc.)
       dto/                        # data classes + entities/
       enums/                      # EConfigType, Language, RoutingType, etc.
@@ -77,8 +76,11 @@ V2rayNG/
 - **Storage**: MMKV exclusively — never SharedPreferences. `MmkvManager` is the data layer.
 - **Core**: Native AAR (`libv2ray`) from [AndroidLibV2rayLite](https://github.com/2dust/AndroidLibV2rayLite) or [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite). Prebuilt `.aar` files go in `app/libs/`.
 - **Services** run in dedicated process `:RunSoLibV2RayDaemon`. `CoreServiceManager` controls start/stop lifecycle.
+- **Service control receiver** is registered from each core Service `onCreate()` and removed in `onDestroy()`, so STOP works during startup and NetLoop recovery as well as after Xray starts.
+- **Stop semantics** are awaited: explicit STOP waits for Xray shutdown and service-specific teardown before reporting `STOP_SUCCESS`; NetLoop recovery stops Xray without dropping the VPN service foreground notification.
 - **Two modes**: VPN (`CoreVpnService`, uses `VpnService.Builder`) or proxy-only (`CoreProxyOnlyService`, local SOCKS/HTTP).
 - **Android package**: personal fork uses application ID `com.v2ray.ang` and publishes only `arm64-v8a` APKs; there are no product flavors.
-- **hev-socks5-tunnel**: Optional tun2socks binary. Build with `./compile-hevtun.sh` (requires `NDK_HOME`).
+- **hev-socks5-tunnel**: Optional tun2socks binary. `./compile-hevtun.sh` builds arm64-v8a only (requires `NDK_HOME`).
+- **Updater**: the upstream GitHub release updater is intentionally removed from this personal fork; updates are installed manually from the fork's release artifacts.
 - **ViewBinding** enabled, no DataBinding.
 - **CI**: GitHub Actions provides Android build/package CI; no pre-commit hooks or dedicated lint/format gate.

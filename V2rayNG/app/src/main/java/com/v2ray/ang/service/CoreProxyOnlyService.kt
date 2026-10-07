@@ -7,12 +7,25 @@ import android.os.IBinder
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.core.CoreServiceManager
+import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.MyContextWrapper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.lang.ref.SoftReference
 
 class CoreProxyOnlyService : Service(), ServiceControl {
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var stopJob: Job? = null
+    private var stopRequested = false
+    private var stopCoreCompleted = false
+
     /**
      * Initializes the service.
      */
@@ -21,6 +34,7 @@ class CoreProxyOnlyService : Service(), ServiceControl {
         LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Service created")
         CoreServiceManager.setNetLoopRuntimeActive(false)
         CoreServiceManager.serviceControl = SoftReference(this)
+        CoreServiceManager.registerServiceControlReceiver(this)
     }
 
     /**
@@ -32,6 +46,10 @@ class CoreProxyOnlyService : Service(), ServiceControl {
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Service command received")
+        if (stopRequested) {
+            LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Ignoring start while stop is completing")
+            return START_NOT_STICKY
+        }
         CoreServiceManager.startCoreLoop(null)
         return START_STICKY
     }
@@ -40,8 +58,21 @@ class CoreProxyOnlyService : Service(), ServiceControl {
      * Destroys the service.
      */
     override fun onDestroy() {
+        val destroyCoreCompleted = runBlocking {
+            CoreServiceManager.stopCoreLoopForServiceDestroy(this@CoreProxyOnlyService)
+        }
+        CoreServiceManager.unregisterServiceControlReceiver(this)
+        if (stopRequested && (stopCoreCompleted || destroyCoreCompleted)) {
+            com.v2ray.ang.util.MessageUtil.sendMsg2UI(
+                this,
+                AppConfig.MSG_STATE_STOP_SUCCESS,
+                "",
+            )
+        }
+        NotificationManager.cancelNotification(this)
+        CoreServiceManager.clearServiceControl(this)
+        serviceScope.cancel()
         super.onDestroy()
-        CoreServiceManager.stopCoreLoop()
     }
 
     /**
@@ -63,7 +94,15 @@ class CoreProxyOnlyService : Service(), ServiceControl {
      * Stops the service.
      */
     override fun stopService() {
-        stopSelf()
+        if (stopJob?.isActive == true) return
+        stopRequested = true
+        stopJob = serviceScope.launch {
+            stopCoreCompleted = CoreServiceManager.stopCoreLoopForServiceStop(this@CoreProxyOnlyService)
+            if (!stopCoreCompleted) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Proxy: Failed to complete core stop")
+            }
+            stopSelf()
+        }
     }
 
     /**

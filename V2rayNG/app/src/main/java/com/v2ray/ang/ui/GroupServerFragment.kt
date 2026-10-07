@@ -49,7 +49,7 @@ class GroupServerFragment : BaseFragment<FragmentGroupServerBinding>(),
         ownerActivity.resources.getStringArray(R.array.share_method_more)
     }
     private val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (SettingsChangeManager.consumeRestartService() && mainViewModel.isRunning.value == true) {
+        if (SettingsChangeManager.consumeRestartService()) {
             ownerActivity.applySettingsServiceChange()
         }
     }

@@ -39,6 +39,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.lang.ref.SoftReference
 
 @SuppressLint("VpnServicePolicy")
@@ -48,6 +49,10 @@ class CoreVpnService : VpnService(), ServiceControl {
     private var tun2SocksService: Tun2SocksControl? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var netLoopStartJob: Job? = null
+    private var netLoopRecoveryJob: Job? = null
+    private var stopJob: Job? = null
+    private var stopCoreCompleted = false
+    private var terminalFailureMessage: String? = null
     private var netLoopManager: NetLoopPluginManager? = null
     private var netLoopRecoveryAttempted = false
     private var isStopping = false
@@ -97,11 +102,12 @@ class CoreVpnService : VpnService(), ServiceControl {
         val policy = StrictMode.ThreadPolicy.Builder().permitAll().build()
         StrictMode.setThreadPolicy(policy)
         CoreServiceManager.serviceControl = SoftReference(this)
+        CoreServiceManager.registerServiceControlReceiver(this)
     }
 
     override fun onRevoke() {
         LogUtil.w(AppConfig.TAG, "StartCore-VPN: Permission revoked")
-        stopAllService()
+        requestStop()
     }
 
 //    override fun onLowMemory() {
@@ -113,6 +119,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service destroyed")
 
         netLoopStartJob?.cancel()
+        netLoopRecoveryJob?.cancel()
         if (!isStopping) {
             // Observable VPN service destruction owns the companion lifetime.
             // A hard process kill still cannot be coordinated and is accepted
@@ -120,11 +127,14 @@ class CoreVpnService : VpnService(), ServiceControl {
             netLoopManager?.stop()
             netLoopManager = null
         }
+        val destroyCoreCompleted = runBlocking {
+            CoreServiceManager.stopCoreLoopForServiceDestroy(this@CoreVpnService)
+        }
+        CoreServiceManager.unregisterServiceControlReceiver(this)
         serviceScope.cancel()
 
-        // Ensure VPN interface is properly closed when the service is destroyed without
-        // going through stopAllService() (e.g. when killed unexpectedly). isRunning is
-        // set to false at the start of stopAllService(), so this guard prevents a double-close.
+        // Ensure the VPN interface is closed when Android destroys the service without
+        // the normal awaited stop path. Normal stop clears isRunning before closing it.
         if (isRunning) {
             try {
                 if (::mInterface.isInitialized) {
@@ -136,20 +146,29 @@ class CoreVpnService : VpnService(), ServiceControl {
             }
         }
 
-        NotificationManager.cancelNotification()
+        terminalFailureMessage?.let { message ->
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
+        } ?: if (isStopping && (stopCoreCompleted || destroyCoreCompleted)) {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_STOP_SUCCESS, "")
+        }
+        NotificationManager.cancelNotification(this)
+        CoreServiceManager.clearServiceControl(this)
         CoreServiceManager.setNetLoopRuntimeActive(false)
         super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received")
+        if (isStopping) {
+            LogUtil.i(AppConfig.TAG, "StartCore-VPN: Ignoring start while stop is completing")
+            return START_NOT_STICKY
+        }
         netLoopSessionActive = NetLoopSettings.isEnabled()
         if (!netLoopSessionActive) {
             netLoopSessionConfig = null
         }
         CoreServiceManager.setNetLoopRuntimeActive(netLoopSessionActive)
         NotificationManager.showNotification(null)
-        isStopping = false
         if (netLoopSessionActive) {
             netLoopStartJob?.cancel()
             netLoopStartJob = serviceScope.launch {
@@ -157,6 +176,9 @@ class CoreVpnService : VpnService(), ServiceControl {
             }
         } else {
             setupVpnService()
+            if (!isRunning || isStopping) {
+                return START_NOT_STICKY
+            }
             startService()
         }
         return START_STICKY
@@ -180,7 +202,7 @@ class CoreVpnService : VpnService(), ServiceControl {
                     stopPlugin = true,
                 )
             } else {
-                stopAllService()
+                requestStop()
             }
             return
         }
@@ -192,7 +214,7 @@ class CoreVpnService : VpnService(), ServiceControl {
     }
 
     override fun stopService() {
-        stopAllService(isForced = true, stopNetLoop = true)
+        requestStop(stopNetLoop = true)
     }
 
     override fun vpnProtect(socket: Int): Boolean {
@@ -259,7 +281,10 @@ class CoreVpnService : VpnService(), ServiceControl {
             return true
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to establish VPN interface", e)
-            stopAllService()
+            if (netLoopSessionActive) {
+                throw e
+            }
+            requestStop()
         }
         return false
     }
@@ -455,14 +480,24 @@ class CoreVpnService : VpnService(), ServiceControl {
         tun2SocksService?.startTun2Socks()
     }
 
-    private fun stopAllService(
-        isForced: Boolean = true,
+    private fun requestStop(
         stopNetLoop: Boolean = true,
+        failureMessage: String? = null,
     ) {
-        if (isForced) {
-            isStopping = true
-            netLoopStartJob?.cancel()
+        if (isStopping) return
+        isStopping = true
+        terminalFailureMessage = failureMessage
+        netLoopStartJob?.cancel()
+        netLoopRecoveryJob?.cancel()
+        stopJob = serviceScope.launch {
+            stopCoreCompleted = stopAllServiceAwaited(stopNetLoop = stopNetLoop)
+            stopSelf()
         }
+    }
+
+    private suspend fun stopAllServiceAwaited(
+        stopNetLoop: Boolean,
+    ): Boolean {
 //        val configName = defaultDPreference.getPrefString(PREF_CURR_CONFIG_GUID, "")
 //        val emptyInfo = VpnNetworkInfo()
 //        val info = loadVpnNetworkInfo(configName, emptyInfo)!! + (lastNetworkInfo ?: emptyInfo)
@@ -481,9 +516,9 @@ class CoreVpnService : VpnService(), ServiceControl {
 
         RootLanSharing.stopClientSharing(this)
 
-        CoreServiceManager.stopCoreLoop()
-        if (isForced) {
-            CoreServiceManager.clearNetLoopRecoveryShutdownSuppression()
+        val coreStopped = CoreServiceManager.stopCoreLoopForServiceStop(this)
+        if (!coreStopped) {
+            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to complete core stop")
         }
 
         if (stopNetLoop) {
@@ -491,33 +526,16 @@ class CoreVpnService : VpnService(), ServiceControl {
             netLoopManager = null
         }
 
-        if (isForced) {
-            netLoopSessionConfig = null
-            //stopSelf has to be called ahead of mInterface.close(). otherwise v2ray core cannot be stooped
-            //It's strage but true.
-            //This can be verified by putting stopself() behind and call stopLoop and startLoop
-            //in a row for several times. You will find that later created v2ray core report port in use
-            //which means the first v2ray core somehow failed to stop and release the port.
-            stopSelf()
-
-            // Add a small delay to allow the async core stop operation to complete
-            // before closing the VPN interface, preventing a race condition that can
-            // leave the VPN icon in the status bar after stopping the service.
-            try {
-                Thread.sleep(100)
-            } catch (e: InterruptedException) {
-                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Sleep interrupted", e)
+        netLoopSessionConfig = null
+        try {
+            if (::mInterface.isInitialized) {
+                mInterface.close()
+                LogUtil.i(AppConfig.TAG, "StartCore-VPN: VPN interface closed")
             }
-
-            try {
-                if (::mInterface.isInitialized) {
-                    mInterface.close()
-                    LogUtil.i(AppConfig.TAG, "StartCore-VPN: VPN interface closed")
-                }
-            } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to close interface", e)
-            }
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to close interface", e)
         }
+        return coreStopped
     }
 
     private suspend fun startNetLoopVpn() {
@@ -560,7 +578,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         }
 
         netLoopRecoveryAttempted = true
-        serviceScope.launch {
+        netLoopRecoveryJob = serviceScope.launch {
             try {
                 pauseDataPathForNetLoopRecovery()
                 LogUtil.w(
@@ -626,8 +644,7 @@ class CoreVpnService : VpnService(), ServiceControl {
             netLoopManager?.stop()
             netLoopManager = null
         }
-        stopAllService(isForced = true, stopNetLoop = false)
-        MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
+        requestStop(stopNetLoop = false, failureMessage = message)
     }
 
     private fun failNetLoopRuntime(error: Exception) {
@@ -635,8 +652,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         LogUtil.e(AppConfig.TAG, "NetLoop runtime failed: $message", error)
         netLoopManager?.stop()
         netLoopManager = null
-        stopAllService(isForced = true, stopNetLoop = false)
-        MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, message)
+        requestStop(stopNetLoop = false, failureMessage = message)
     }
 }
 
