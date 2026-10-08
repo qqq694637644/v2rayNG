@@ -6,22 +6,16 @@ on:
       release_tag:
         required: false
         type: string
-      android_libxraylite_tag:
-        description: 'AndroidLibXrayLite release tag to download libv2ray.aar from'
-        required: false
-        default: 'v26.3.27-v2rayng'
-        type: string
-      android_libxraylite_repository:
-        description: 'Repository to download libv2ray.aar from'
-        required: false
-        default: 'qqq694637644/AndroidLibXrayLite'
-        type: string
   push:
     branches:
       - master
 
 permissions:
   contents: write
+
+env:
+  ANDROID_LIBXRAYLITE_REPOSITORY: qqq694637644/AndroidLibXrayLite
+  ANDROID_LIBXRAYLITE_TAG: v26.3.27-v2rayng
 
 jobs:
   build:
@@ -74,30 +68,11 @@ jobs:
       run: |
         cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
 
-    - name: Resolve AndroidLibXrayLite tag
-      env:
-        REQUESTED_ANDROID_LIBXRAYLITE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_tag || '' }}
-        REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_repository || 'qqq694637644/AndroidLibXrayLite' }}
-      run: |
-        CURRENT_REPOSITORY="${REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY:-qqq694637644/AndroidLibXrayLite}"
-        if [ -n "$REQUESTED_ANDROID_LIBXRAYLITE_TAG" ]; then
-          CURRENT_TAG="$REQUESTED_ANDROID_LIBXRAYLITE_TAG"
-          echo "Using requested AndroidLibXrayLite tag: $CURRENT_TAG"
-        else
-          pushd AndroidLibXrayLite
-          CURRENT_TAG=$(git describe --tags --abbrev=0)
-          echo "Using AndroidLibXrayLite submodule tag: $CURRENT_TAG"
-          popd
-        fi
-        echo "Using AndroidLibXrayLite repository: $CURRENT_REPOSITORY"
-        echo "CURRENT_REPOSITORY=$CURRENT_REPOSITORY" >> $GITHUB_ENV
-        echo "CURRENT_TAG=$CURRENT_TAG" >> $GITHUB_ENV
-
     - name: Download libv2ray
       uses: robinraju/release-downloader@v1.13
       with:
-        repository: ${{ env.CURRENT_REPOSITORY }}
-        tag: ${{ env.CURRENT_TAG }}
+        repository: ${{ env.ANDROID_LIBXRAYLITE_REPOSITORY }}
+        tag: ${{ env.ANDROID_LIBXRAYLITE_TAG }}
         fileName: 'libv2ray.aar'
         out-file-path: V2rayNG/app/libs/
 

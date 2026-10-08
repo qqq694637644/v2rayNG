@@ -74,7 +74,8 @@ V2rayNG/
 ## Key facts
 
 - **Storage**: MMKV exclusively — never SharedPreferences. `MmkvManager` is the data layer.
-- **Core**: Native AAR (`libv2ray`) from [AndroidLibV2rayLite](https://github.com/2dust/AndroidLibV2rayLite) or [AndroidLibXrayLite](https://github.com/2dust/AndroidLibXrayLite). Prebuilt `.aar` files go in `app/libs/`.
+- **Core**: build and release workflows download `libv2ray.aar` from `qqq694637644/AndroidLibXrayLite` tag `v26.3.27-v2rayng`. This fixed repository/tag is the only release source; there is no AndroidLibXrayLite submodule/tag inference path.
+- **Deployment**: v2rayNG + NetLoop are a coordinated personal pair. Independent in-place upgrade compatibility is not required; uninstall/reinstall both together when signatures differ. Do not add a stable signing/keystore architecture for the pair.
 - **Services** run in dedicated process `:RunSoLibV2RayDaemon`. `CoreServiceManager` controls start/stop lifecycle.
 - **Service control receiver** is registered from each core Service `onCreate()` and removed in `onDestroy()`, so STOP works during startup and NetLoop recovery as well as after Xray starts.
 - **Stop semantics** are awaited: explicit STOP waits for Xray shutdown and service-specific teardown before reporting `STOP_SUCCESS`; NetLoop recovery stops Xray without dropping the VPN service foreground notification.

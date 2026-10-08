@@ -11,6 +11,7 @@ import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.root.RootProxyManager
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.MessageUtil
 import com.v2ray.ang.util.MyContextWrapper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +42,7 @@ class CoreRootService : Service(), ServiceControl {
     private var stopRequested = false
     private var stopCoreCompleted = false
     private var startAccepted = false
+    private var terminalFailureMessage: String? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -61,19 +63,40 @@ class CoreRootService : Service(), ServiceControl {
             return START_STICKY
         }
         startAccepted = true
+        NotificationManager.showNotification(null)
 
-        // Start the in-process core first (this also posts the foreground notification),
-        // then install the root routing off the main thread.
-        if (!CoreServiceManager.startCoreLoop(null)) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Root: core failed to start")
+        // The Service already owns the foreground notification. Start Xray,
+        // then install root routing before publishing START_SUCCESS.
+        val config = try {
+            CoreServiceManager.startCoreLoop(null)
+        } catch (e: Exception) {
+            terminalFailureMessage = e.message ?: e.javaClass.simpleName
+            LogUtil.e(AppConfig.TAG, "StartCore-Root: core failed to start", e)
             stopService()
             return START_NOT_STICKY
         }
 
         setupJob = serviceScope.launch(Dispatchers.IO) {
-            if (!RootProxyManager.start(this@CoreRootService)) {
-                LogUtil.e(AppConfig.TAG, "StartCore-Root: failed to start root mode, stopping")
-                stopService()
+            val error = try {
+                if (RootProxyManager.start(this@CoreRootService)) {
+                    null
+                } else {
+                    IllegalStateException("Failed to start root routing")
+                }
+            } catch (e: Exception) {
+                e
+            }
+
+            withContext(Dispatchers.Main.immediate) {
+                if (error != null) {
+                    terminalFailureMessage = error.message ?: error.javaClass.simpleName
+                    LogUtil.e(AppConfig.TAG, "StartCore-Root: failed to start root mode", error)
+                    stopService()
+                } else {
+                    NotificationManager.showNotification(config)
+                    MessageUtil.sendMsg2UI(this@CoreRootService, AppConfig.MSG_STATE_START_SUCCESS, "")
+                    NotificationManager.startSpeedNotification()
+                }
             }
         }
 
@@ -86,12 +109,13 @@ class CoreRootService : Service(), ServiceControl {
             CoreServiceManager.stopCoreLoopForServiceDestroy(this@CoreRootService)
         }
         CoreServiceManager.unregisterServiceControlReceiver(this)
-        if (stopRequested && (stopCoreCompleted || destroyCoreCompleted)) {
-            com.v2ray.ang.util.MessageUtil.sendMsg2UI(
-                this,
-                AppConfig.MSG_STATE_STOP_SUCCESS,
-                "",
-            )
+        val failureMessage = terminalFailureMessage
+        if (failureMessage != null) {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, failureMessage)
+        } else if (stopRequested && (stopCoreCompleted || destroyCoreCompleted)) {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_STOP_SUCCESS, "")
+        } else {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_NOT_RUNNING, "")
         }
         NotificationManager.cancelNotification(this)
         CoreServiceManager.clearServiceControl(this)

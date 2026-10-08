@@ -151,6 +151,8 @@ class CoreVpnService : VpnService(), ServiceControl {
             MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, failureMessage)
         } else if (isStopping && stopCoreCompleted) {
             MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_STOP_SUCCESS, "")
+        } else {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_NOT_RUNNING, "")
         }
         NotificationManager.cancelNotification(this)
         CoreServiceManager.clearServiceControl(this)
@@ -181,11 +183,18 @@ class CoreVpnService : VpnService(), ServiceControl {
                 startNetLoopVpn()
             }
         } else {
-            setupVpnService()
-            if (!isRunning || isStopping) {
+            try {
+                setupVpnService()
+                if (!isRunning || isStopping) {
+                    error("Failed to establish VPN interface.")
+                }
+                startService()
+            } catch (e: Exception) {
+                val message = e.message ?: e.javaClass.simpleName
+                LogUtil.e(AppConfig.TAG, "StartCore-VPN: $message", e)
+                requestStop(stopNetLoop = false, failureMessage = message)
                 return START_NOT_STICKY
             }
-            startService()
         }
         return START_STICKY
         //return super.onStartCommand(intent, flags, startId)
@@ -197,25 +206,18 @@ class CoreVpnService : VpnService(), ServiceControl {
 
     override fun startService() {
         if (!::mInterface.isInitialized) {
-            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Interface not initialized")
-            return
+            error("VPN interface is not initialized")
         }
-        if (!CoreServiceManager.startCoreLoop(mInterface)) {
-            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
-            if (netLoopSessionActive) {
-                failNetLoopStartup(
-                    IllegalStateException("Failed to start Xray for NetLoop mode."),
-                )
-            } else {
-                requestStop()
-            }
-            return
-        }
+
+        val config = CoreServiceManager.startCoreLoop(mInterface)
 
         // Start LAN sharing if enabled in settings
         if (!netLoopSessionActive) {
             RootLanSharing.startClientSharing(this)
         }
+        NotificationManager.showNotification(config)
+        MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_SUCCESS, "")
+        NotificationManager.startSpeedNotification()
     }
 
     override fun stopService() {
@@ -241,24 +243,18 @@ class CoreVpnService : VpnService(), ServiceControl {
         val prepare = prepare(this)
         if (prepare != null) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Permission not granted")
-            stopSelf()
-            return
+            error("VPN permission not granted")
         }
 
-        if (configureVpnService() != true) {
-            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Configuration failed")
-            stopSelf()
-            return
-        }
+        configureVpnService()
 
         runTun2socks()
     }
 
     /**
      * Configures the VPN service.
-     * @return True if the VPN service was configured successfully, false otherwise.
      */
-    private fun configureVpnService(): Boolean {
+    private fun configureVpnService() {
         val builder = Builder()
 
         // Configure network settings (addresses, routing and DNS)
@@ -283,15 +279,10 @@ class CoreVpnService : VpnService(), ServiceControl {
         try {
             mInterface = builder.establish()!!
             isRunning = true
-            return true
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to establish VPN interface", e)
-            if (netLoopSessionActive) {
-                throw e
-            }
-            requestStop()
+            throw e
         }
-        return false
     }
 
     /**

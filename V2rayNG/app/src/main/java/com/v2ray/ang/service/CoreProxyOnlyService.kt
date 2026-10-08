@@ -10,6 +10,7 @@ import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.MessageUtil
 import com.v2ray.ang.util.MyContextWrapper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,7 @@ class CoreProxyOnlyService : Service(), ServiceControl {
     private var stopRequested = false
     private var stopCoreCompleted = false
     private var startAccepted = false
+    private var terminalFailureMessage: String? = null
 
     /**
      * Initializes the service.
@@ -56,8 +58,15 @@ class CoreProxyOnlyService : Service(), ServiceControl {
             return START_STICKY
         }
         startAccepted = true
-        if (!CoreServiceManager.startCoreLoop(null)) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Proxy: core failed to start")
+        NotificationManager.showNotification(null)
+        try {
+            val config = CoreServiceManager.startCoreLoop(null)
+            NotificationManager.showNotification(config)
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_SUCCESS, "")
+            NotificationManager.startSpeedNotification()
+        } catch (e: Exception) {
+            terminalFailureMessage = e.message ?: e.javaClass.simpleName
+            LogUtil.e(AppConfig.TAG, "StartCore-Proxy: core failed to start", e)
             stopService()
             return START_NOT_STICKY
         }
@@ -72,12 +81,13 @@ class CoreProxyOnlyService : Service(), ServiceControl {
             CoreServiceManager.stopCoreLoopForServiceDestroy(this@CoreProxyOnlyService)
         }
         CoreServiceManager.unregisterServiceControlReceiver(this)
-        if (stopRequested && (stopCoreCompleted || destroyCoreCompleted)) {
-            com.v2ray.ang.util.MessageUtil.sendMsg2UI(
-                this,
-                AppConfig.MSG_STATE_STOP_SUCCESS,
-                "",
-            )
+        val failureMessage = terminalFailureMessage
+        if (failureMessage != null) {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, failureMessage)
+        } else if (stopRequested && (stopCoreCompleted || destroyCoreCompleted)) {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_STOP_SUCCESS, "")
+        } else {
+            MessageUtil.sendMsg2UI(this, AppConfig.MSG_STATE_NOT_RUNNING, "")
         }
         NotificationManager.cancelNotification(this)
         CoreServiceManager.clearServiceControl(this)

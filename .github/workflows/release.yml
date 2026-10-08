@@ -20,19 +20,13 @@ on:
         required: false
         default: false
         type: boolean
-      android_libxraylite_tag:
-        description: 'AndroidLibXrayLite release tag to download libv2ray.aar from'
-        required: false
-        default: 'v26.3.27-v2rayng'
-        type: string
-      android_libxraylite_repository:
-        description: 'Repository to download libv2ray.aar from'
-        required: false
-        default: 'qqq694637644/AndroidLibXrayLite'
-        type: string
 
 permissions:
   contents: write
+
+env:
+  ANDROID_LIBXRAYLITE_REPOSITORY: qqq694637644/AndroidLibXrayLite
+  ANDROID_LIBXRAYLITE_TAG: v26.3.27-v2rayng
 
 jobs:
   release-apk:
@@ -91,32 +85,11 @@ jobs:
           set -euo pipefail
           cp -r "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/V2rayNG/app"
 
-      - name: Resolve AndroidLibXrayLite tag
-        shell: bash
-        env:
-          REQUESTED_ANDROID_LIBXRAYLITE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_tag || '' }}
-          REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY: ${{ github.event_name == 'workflow_dispatch' && inputs.android_libxraylite_repository || 'qqq694637644/AndroidLibXrayLite' }}
-        run: |
-          set -euo pipefail
-          current_repository="${REQUESTED_ANDROID_LIBXRAYLITE_REPOSITORY:-qqq694637644/AndroidLibXrayLite}"
-          if [[ -n "$REQUESTED_ANDROID_LIBXRAYLITE_TAG" ]]; then
-            current_tag="$REQUESTED_ANDROID_LIBXRAYLITE_TAG"
-            echo "Using requested AndroidLibXrayLite tag: $current_tag"
-          else
-            pushd AndroidLibXrayLite
-            current_tag=$(git describe --tags --abbrev=0)
-            echo "Using AndroidLibXrayLite submodule tag: $current_tag"
-            popd
-          fi
-          echo "Using AndroidLibXrayLite repository: $current_repository"
-          echo "CURRENT_REPOSITORY=$current_repository" >> "$GITHUB_ENV"
-          echo "CURRENT_TAG=$current_tag" >> "$GITHUB_ENV"
-
       - name: Download libv2ray
         uses: robinraju/release-downloader@v1.13
         with:
-          repository: ${{ env.CURRENT_REPOSITORY }}
-          tag: ${{ env.CURRENT_TAG }}
+          repository: ${{ env.ANDROID_LIBXRAYLITE_REPOSITORY }}
+          tag: ${{ env.ANDROID_LIBXRAYLITE_TAG }}
           fileName: 'libv2ray.aar'
           out-file-path: V2rayNG/app/libs/
 
@@ -150,7 +123,7 @@ jobs:
             key_password="$APP_KEY_PASSWORD_SECRET"
           else
             echo 'Android signing secrets are incomplete; generating a temporary runner-local keystore.'
-            echo 'The generated APK cannot be used for in-place upgrades across releases. Uninstall the previous APK before installing this one.'
+            echo 'This personal pair does not require in-place upgrades. Uninstall both v2rayNG and NetLoop before installing the new pair.'
             keystore_password="$(openssl rand -hex 32)"
             key_alias='v2rayng-temp'
             key_password="$(openssl rand -hex 32)"

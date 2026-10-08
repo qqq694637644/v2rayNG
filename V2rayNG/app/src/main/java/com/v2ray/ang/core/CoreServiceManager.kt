@@ -199,8 +199,8 @@ object CoreServiceManager {
      */
     @Throws(Exception::class)
     private fun startContextService(context: Context) {
-        if (coreController.isRunning) {
-            LogUtil.w(AppConfig.TAG, "StartCore-Manager: Core already running")
+        if (isServiceSessionActive()) {
+            LogUtil.w(AppConfig.TAG, "StartCore-Manager: Service session already active")
             return
         }
 
@@ -294,32 +294,23 @@ object CoreServiceManager {
      * `registerReceiver(Context, BroadcastReceiver, IntentFilter, int)`.
      * Starts the V2Ray core service.
      */
-    fun startCoreLoop(vpnInterface: ParcelFileDescriptor?): Boolean {
+    @Throws(Exception::class)
+    fun startCoreLoop(vpnInterface: ParcelFileDescriptor?): ProfileItem? {
         if (coreController.isRunning) {
-            LogUtil.w(AppConfig.TAG, "StartCore-Manager: Core already running")
-            return false
+            error("Core already running")
         }
 
         val service = getService()
-        if (service == null) {
-            LogUtil.e(AppConfig.TAG, "StartCore-Manager: Service is null")
-            return false
-        }
+            ?: error("Service is unavailable")
 
-        try {
-            doStartCoreLoop(service, vpnInterface)
-            return true
-        } catch (e: Exception) {
-            val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
-            LogUtil.e(AppConfig.TAG, "StartCore-Manager: $message", e)
-            MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
-            NotificationManager.cancelNotification(service)
-            return false
-        }
+        return doStartCoreLoop(service, vpnInterface)
     }
 
     @Throws(Exception::class)
-    private fun doStartCoreLoop(service: Service, vpnInterface: ParcelFileDescriptor?) {
+    private fun doStartCoreLoop(
+        service: Service,
+        vpnInterface: ParcelFileDescriptor?,
+    ): ProfileItem? {
         val netLoopEnabled = netLoopRuntimeActive
         val config = if (netLoopEnabled) {
             null
@@ -360,7 +351,6 @@ object CoreServiceManager {
             tunFd = 0
         }
 
-        NotificationManager.showNotification(currentConfig)
         CoreNativeManager.reconcileBrowserDialer(dialerAddr)
         coreController.startLoop(result.content, tunFd)
 
@@ -380,9 +370,8 @@ object CoreServiceManager {
             browserDialer!!.start(service, dialerAddr)
         }
 
-        MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
-        NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
+        return config
     }
 
     suspend fun stopCoreLoopForServiceStop(
