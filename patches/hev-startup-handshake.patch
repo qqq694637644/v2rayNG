@@ -1,0 +1,281 @@
+diff --git a/src/hev-jni.c b/src/hev-jni.c
+index 9698555..9f913dd 100644
+--- a/src/hev-jni.c
++++ b/src/hev-jni.c
+@@ -43,9 +43,12 @@ struct _ThreadData
+ };
+
+ static int is_working;
++static int startup_done;
++static int startup_result;
+ static JavaVM *java_vm;
+ static pthread_t work_thread;
+ static pthread_mutex_t mutex;
++static pthread_cond_t startup_cond;
+ static pthread_key_t current_jni_env;
+
+ static void native_start_service (JNIEnv *env, jobject thiz, jstring conig_path,
+@@ -84,16 +87,30 @@ JNI_OnLoad (JavaVM *vm, void *reserved)
+
+     pthread_key_create (&current_jni_env, detach_current_thread);
+     pthread_mutex_init (&mutex, NULL);
++    pthread_cond_init (&startup_cond, NULL);
+
+     return JNI_VERSION_1_4;
+ }
+
++static void
++startup_notify (int result, void *data)
++{
++    pthread_mutex_lock (&mutex);
++    startup_result = result;
++    startup_done = 1;
++    if (result == 0)
++        is_working = 1;
++    pthread_cond_signal (&startup_cond);
++    pthread_mutex_unlock (&mutex);
++}
++
+ static void *
+ thread_handler (void *data)
+ {
+     ThreadData *tdata = data;
+
+-    hev_socks5_tunnel_main (tdata->path, tdata->fd);
++    hev_socks5_tunnel_main_with_notify (tdata->path, tdata->fd, startup_notify,
++                                        NULL);
+
+     free (tdata->path);
+     free (tdata);
+@@ -105,7 +122,9 @@ static void
+ native_start_service (JNIEnv *env, jobject thiz, jstring config_path, jint fd)
+ {
+     const jbyte *bytes;
++    jclass exception_class;
+     ThreadData *tdata;
++    char message[96];
+     int res;
+
+     pthread_mutex_lock (&mutex);
+@@ -114,20 +133,51 @@ native_start_service (JNIEnv *env, jobject thiz, jstring config_path, jint fd)
+         goto exit;
+
+     tdata = malloc (sizeof (ThreadData));
++    if (!tdata) {
++        (*env)->ThrowNew (env, (*env)->FindClass (env, "java/lang/OutOfMemoryError"),
++                          "Unable to allocate HEV startup state");
++        goto exit;
++    }
+     tdata->fd = fd;
+
+     bytes = (const jbyte *)(*env)->GetStringUTFChars (env, config_path, NULL);
++    if (!bytes) {
++        free (tdata);
++        goto exit;
++    }
+     tdata->path = strdup ((const char *)bytes);
+     (*env)->ReleaseStringUTFChars (env, config_path, (const char *)bytes);
++    if (!tdata->path) {
++        free (tdata);
++        (*env)->ThrowNew (env, (*env)->FindClass (env, "java/lang/OutOfMemoryError"),
++                          "Unable to copy HEV config path");
++        goto exit;
++    }
++
++    startup_done = 0;
++    startup_result = -1;
+
+     res = pthread_create (&work_thread, NULL, thread_handler, tdata);
+     if (res != 0) {
+         free (tdata->path);
+         free (tdata);
++        exception_class = (*env)->FindClass (env, "java/lang/IllegalStateException");
++        snprintf (message, sizeof (message),
++                  "Failed to create HEV worker thread: %d", res);
++        (*env)->ThrowNew (env, exception_class, message);
+         goto exit;
+     }
+
+-    is_working = 1;
++    while (!startup_done)
++        pthread_cond_wait (&startup_cond, &mutex);
++
++    if (startup_result < 0) {
++        res = startup_result;
++        pthread_join (work_thread, NULL);
++        exception_class = (*env)->FindClass (env, "java/lang/IllegalStateException");
++        snprintf (message, sizeof (message), "HEV startup failed: %d", res);
++        (*env)->ThrowNew (env, exception_class, message);
++    }
+ exit:
+     pthread_mutex_unlock (&mutex);
+ }
+diff --git a/src/hev-main.c b/src/hev-main.c
+index 38dcae0..0b41781 100644
+--- a/src/hev-main.c
++++ b/src/hev-main.c
+@@ -27,13 +27,19 @@
+ #include "hev-main.h"
+
+ static int
+-hev_socks5_tunnel_main_inner (int tun_fd)
++hev_socks5_tunnel_main_inner (int tun_fd,
++                              HevSocks5TunnelStartupNotify startup_notify,
++                              void *startup_data)
+ {
+     const char *pid_file;
+     const char *log_file;
++    int logger_ready = 0;
++    int socks_logger_ready = 0;
++    int task_system_ready = 0;
++    int tunnel_ready = 0;
+     int log_level;
+     int nofile;
+-    int res;
++    int res = 0;
+
+     log_file = hev_config_get_misc_log_file ();
+     log_level = hev_config_get_misc_log_level ();
+@@ -49,12 +55,18 @@ hev_socks5_tunnel_main_inner (int tun_fd)
+     hev_socks5_set_udp_recv_buffer_size (res);
+
+     res = hev_logger_init (log_level, log_file);
+-    if (res < 0)
+-        return -2;
++    if (res < 0) {
++        res = -2;
++        goto startup_failed;
++    }
++    logger_ready = 1;
+
+     res = hev_socks5_logger_init (log_level, log_file);
+-    if (res < 0)
+-        return -3;
++    if (res < 0) {
++        res = -3;
++        goto startup_failed;
++    }
++    socks_logger_ready = 1;
+
+     nofile = hev_config_get_misc_limit_nofile ();
+     res = set_limit_nofile (nofile);
+@@ -66,24 +78,45 @@ hev_socks5_tunnel_main_inner (int tun_fd)
+         run_as_daemon (pid_file);
+
+     res = hev_task_system_init ();
+-    if (res < 0)
+-        return -4;
++    if (res < 0) {
++        res = -4;
++        goto startup_failed;
++    }
++    task_system_ready = 1;
+
+     lwip_init ();
+
+     res = hev_socks5_tunnel_init (tun_fd);
+-    if (res < 0)
+-        return -5;
++    if (res < 0) {
++        res = -5;
++        goto startup_failed;
++    }
++    tunnel_ready = 1;
++
++    if (startup_notify)
++        startup_notify (0, startup_data);
+
+     hev_socks5_tunnel_run ();
+
+-    hev_socks5_tunnel_fini ();
+-    hev_socks5_logger_fini ();
+-    hev_logger_fini ();
++    res = 0;
++    goto cleanup;
++
++startup_failed:
++    if (startup_notify)
++        startup_notify (res, startup_data);
++
++cleanup:
++    if (tunnel_ready)
++        hev_socks5_tunnel_fini ();
++    if (socks_logger_ready)
++        hev_socks5_logger_fini ();
++    if (logger_ready)
++        hev_logger_fini ();
+     hev_config_fini ();
+-    hev_task_system_fini ();
++    if (task_system_ready)
++        hev_task_system_fini ();
+
+-    return 0;
++    return res;
+ }
+
+ int
+@@ -93,7 +126,7 @@ hev_socks5_tunnel_main_from_file (const char *config_path, int tun_fd)
+     if (res < 0)
+         return -1;
+
+-    return hev_socks5_tunnel_main_inner (tun_fd);
++    return hev_socks5_tunnel_main_inner (tun_fd, NULL, NULL);
+ }
+
+ int
+@@ -104,7 +137,7 @@ hev_socks5_tunnel_main_from_str (const unsigned char *config_str,
+     if (res < 0)
+         return -1;
+
+-    return hev_socks5_tunnel_main_inner (tun_fd);
++    return hev_socks5_tunnel_main_inner (tun_fd, NULL, NULL);
+ }
+
+ int
+@@ -113,6 +146,22 @@ hev_socks5_tunnel_main (const char *config_path, int tun_fd)
+     return hev_socks5_tunnel_main_from_file (config_path, tun_fd);
+ }
+
++int
++hev_socks5_tunnel_main_with_notify (
++    const char *config_path, int tun_fd,
++    HevSocks5TunnelStartupNotify startup_notify, void *startup_data)
++{
++    int res = hev_config_init_from_file (config_path);
++
++    if (res < 0) {
++        if (startup_notify)
++            startup_notify (-1, startup_data);
++        return -1;
++    }
++
++    return hev_socks5_tunnel_main_inner (tun_fd, startup_notify, startup_data);
++}
++
+ void
+ hev_socks5_tunnel_quit (void)
+ {
+diff --git a/src/hev-main.h b/src/hev-main.h
+index 49896b9..263c4cd 100644
+--- a/src/hev-main.h
++++ b/src/hev-main.h
+@@ -10,6 +10,8 @@
+ #ifndef __HEV_MAIN_H__
+ #define __HEV_MAIN_H__
+
++typedef void (*HevSocks5TunnelStartupNotify) (int result, void *data);
++
+ #include <stddef.h>
+
+ #ifdef __cplusplus
+@@ -30,6 +32,10 @@ extern "C" {
+  */
+ int hev_socks5_tunnel_main (const char *config_path, int tun_fd);
+
++int hev_socks5_tunnel_main_with_notify (
++    const char *config_path, int tun_fd,
++    HevSocks5TunnelStartupNotify startup_notify, void *startup_data);
++
+ /**
+  * hev_socks5_tunnel_main_from_file:
+  * @config_path: config file path

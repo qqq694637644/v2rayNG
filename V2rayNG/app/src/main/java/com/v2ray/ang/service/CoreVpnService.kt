@@ -480,7 +480,9 @@ class CoreVpnService : VpnService(), ServiceControl {
     ) {
         if (isStopping) return
         isStopping = true
-        terminalFailureMessage = failureMessage
+        if (failureMessage != null) {
+            terminalFailureMessage = failureMessage
+        }
         netLoopStartJob?.cancel()
         netLoopRecoveryJob?.cancel()
         stopJob = serviceScope.launch {
@@ -492,7 +494,6 @@ class CoreVpnService : VpnService(), ServiceControl {
                 // report STOP_SUCCESS while the dedicated :netloop process is
                 // still alive.
                 isStopping = false
-                terminalFailureMessage = null
             }
         }
     }

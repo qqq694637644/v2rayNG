@@ -81,7 +81,7 @@ V2rayNG/
 - **Stop semantics** are awaited: explicit STOP waits for Xray shutdown and service-specific teardown before reporting `STOP_SUCCESS`; NetLoop recovery stops Xray without dropping the VPN service foreground notification.
 - **Two modes**: VPN (`CoreVpnService`, uses `VpnService.Builder`) or proxy-only (`CoreProxyOnlyService`, local SOCKS/HTTP).
 - **Android package**: personal fork uses application ID `com.v2ray.ang` and publishes only `arm64-v8a` APKs; there are no product flavors.
-- **hev-socks5-tunnel**: Optional tun2socks binary. `./compile-hevtun.sh` builds arm64-v8a only (requires `NDK_HOME`).
+- **hev-socks5-tunnel**: `./compile-hevtun.sh` builds arm64-v8a only (requires `NDK_HOME`) from the pinned upstream submodule plus `patches/hev-startup-handshake.patch`. That patch is part of the product contract: JNI must not return from `TProxyStartService()` until native config/logger/task/tunnel initialization has succeeded or an exception has been raised.
 - **Updater**: the upstream GitHub release updater is intentionally removed from this personal fork; updates are installed manually from the fork's release artifacts.
 - **ViewBinding** enabled, no DataBinding.
 - **CI**: GitHub Actions provides Android build/package CI; no pre-commit hooks or dedicated lint/format gate.

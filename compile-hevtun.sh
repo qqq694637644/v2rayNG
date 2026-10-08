@@ -17,11 +17,19 @@ clear_tmp () {
 trap 'echo -e "Aborted, error $? in command: $BASH_COMMAND"; trap ERR; clear_tmp; exit 1' ERR INT
 
 ABIS="arm64-v8a"
+HEV_PATCH="$__dir/patches/hev-startup-handshake.patch"
 
 mkdir -p "$TMPDIR/jni"
 pushd "$TMPDIR"
 
-ln -s "$__dir/hev-socks5-tunnel" jni/hev-socks5-tunnel
+# Build from an isolated copy so the pinned upstream submodule stays clean.
+# The local patch adds the one-shot JNI startup handshake required by v2rayNG.
+cp -a "$__dir/hev-socks5-tunnel" jni/hev-socks5-tunnel
+rm -rf jni/hev-socks5-tunnel/.git
+(
+  cd jni/hev-socks5-tunnel
+  git apply --no-index "$HEV_PATCH"
+)
 
 # 1) JNI shared library (libhev-socks5-tunnel.so) — loaded in-process by
 #    com.v2ray.ang.service.TProxyService for the VpnService hev tun mode.
