@@ -15,8 +15,6 @@ import java.io.File
 class TProxyService(
     private val context: Context,
     private val vpnInterface: ParcelFileDescriptor,
-    private val isRunningProvider: () -> Boolean,
-    private val restartCallback: () -> Unit,
     private val forceIpv6: Boolean = false,
     private val socksPortOverride: Int? = null,
     private val useSocksAuthentication: Boolean = true,
@@ -52,12 +50,8 @@ class TProxyService(
 //        LogUtil.i(AppConfig.TAG, "Config file created: ${configFile.absolutePath}")
         LogUtil.d(AppConfig.TAG, "HevSocks5Tunnel Config content:\n$configContent")
 
-        try {
-//            LogUtil.i(AppConfig.TAG, "TProxyStartService...")
-            TProxyStartService(configFile.absolutePath, vpnInterface.fd)
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "HevSocks5Tunnel exception: ${e.message}")
-        }
+//        LogUtil.i(AppConfig.TAG, "TProxyStartService...")
+        TProxyStartService(configFile.absolutePath, vpnInterface.fd)
     }
 
     private fun buildConfig(): String {

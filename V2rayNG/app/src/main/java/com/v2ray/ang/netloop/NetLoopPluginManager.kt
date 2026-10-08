@@ -187,12 +187,13 @@ class NetLoopPluginManager(
             val deathRecipient = IBinder.DeathRecipient {
                 died.complete(Unit)
             }
+            var shouldDetach = false
 
             try {
                 try {
                     binder.linkToDeath(deathRecipient, 0)
                 } catch (_: RemoteException) {
-                    detachInternal()
+                    shouldDetach = true
                     return
                 }
 
@@ -201,19 +202,23 @@ class NetLoopPluginManager(
                     requireOk(response)
                 } catch (e: Exception) {
                     if (binder.isBinderAlive) throw e
+                    shouldDetach = true
+                    return
                 }
 
-                detachInternal()
                 if (binder.isBinderAlive) {
                     withTimeout(STOP_TIMEOUT_MS) {
                         died.await()
                     }
                 }
+                shouldDetach = true
             } finally {
-                detachInternal()
                 try {
                     binder.unlinkToDeath(deathRecipient, 0)
                 } catch (_: Exception) {
+                }
+                if (shouldDetach) {
+                    detachInternal()
                 }
             }
         } finally {

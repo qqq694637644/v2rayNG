@@ -468,8 +468,6 @@ class CoreVpnService : VpnService(), ServiceControl {
             tun2SocksService = TProxyService(
                 context = applicationContext,
                 vpnInterface = mInterface,
-                isRunningProvider = { isRunning },
-                restartCallback = { runTun2socks() },
                 forceIpv6 = netLoopSessionActive,
                 socksPortOverride = if (netLoopSessionActive) {
                     NetLoopSettings.XRAY_INTERNAL_SOCKS_PORT
