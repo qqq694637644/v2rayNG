@@ -526,16 +526,8 @@ object Utils {
         return false
     }
 
-    /**
-     * Get the receiver flags based on the Android version.
-     *
-     * @return The receiver flags.
-     */
-    fun receiverFlags(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ContextCompat.RECEIVER_EXPORTED
-    } else {
-        ContextCompat.RECEIVER_NOT_EXPORTED
-    }
+    /** Internal app broadcasts are never exposed to other applications. */
+    fun receiverFlags(): Int = ContextCompat.RECEIVER_NOT_EXPORTED
 
     /**
      * Check if the package is Xray.

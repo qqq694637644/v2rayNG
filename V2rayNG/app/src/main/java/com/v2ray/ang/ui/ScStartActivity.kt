@@ -11,7 +11,7 @@ class ScStartActivity : BaseActivity() {
 
         setContentView(R.layout.activity_none)
 
-        if (!CoreServiceManager.isRunning()) {
+        if (!CoreServiceManager.isServiceSessionActive()) {
             CoreServiceManager.startVServiceFromToggle(this)
         }
         finish()

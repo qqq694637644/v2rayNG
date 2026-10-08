@@ -11,7 +11,7 @@ class ScSwitchActivity : BaseActivity() {
 
         setContentView(R.layout.activity_none)
 
-        if (CoreServiceManager.isRunning()) {
+        if (CoreServiceManager.isServiceSessionActive()) {
             CoreServiceManager.stopVService(this)
         } else {
             CoreServiceManager.startVServiceFromToggle(this)

@@ -91,6 +91,10 @@ object CoreServiceManager {
             ContextCompat.registerReceiver(service, mMsgReceive, filter, Utils.receiverFlags())
             receiverService = SoftReference(service)
         }
+        // RUNNING is the Service/session state, not the Xray core-ready state.
+        // Publish it as soon as the Service owns its control receiver so the
+        // main UI can Stop a long NetLoop STARTING/recovery session.
+        MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_RUNNING, "")
     }
 
     fun unregisterServiceControlReceiver(service: Service) {
@@ -164,11 +168,10 @@ object CoreServiceManager {
         MessageUtil.sendMsg2Service(context, AppConfig.MSG_STATE_STOP, "")
     }
 
-    /**
-     * Checks if the V2Ray service is running.
-     * @return True if the service is running, false otherwise.
-     */
-    fun isRunning() = coreController.isRunning
+    fun isCoreRunning() = coreController.isRunning
+
+    fun isServiceSessionActive(): Boolean =
+        serviceControl?.get()?.getService() != null
 
     /**
      * Gets the name of the currently running server.
@@ -463,6 +466,17 @@ object CoreServiceManager {
      */
     private fun measureV2rayDelay() {
         if (coreController.isRunning == false) {
+            val service = getService() ?: return
+            val state = if (netLoopRuntimeActive) {
+                "NetLoop starting/recovering"
+            } else {
+                "Core starting"
+            }
+            MessageUtil.sendMsg2UI(
+                service,
+                AppConfig.MSG_MEASURE_DELAY_SUCCESS,
+                service.getString(R.string.connection_test_error, state),
+            )
             return
         }
 

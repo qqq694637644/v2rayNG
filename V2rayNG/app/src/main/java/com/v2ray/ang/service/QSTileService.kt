@@ -42,7 +42,7 @@ class QSTileService : TileService() {
     override fun onStartListening() {
         super.onStartListening()
 
-        if (CoreServiceManager.isRunning()) {
+        if (CoreServiceManager.isServiceSessionActive()) {
             setState(Tile.STATE_ACTIVE)
         } else {
             setState(Tile.STATE_INACTIVE)

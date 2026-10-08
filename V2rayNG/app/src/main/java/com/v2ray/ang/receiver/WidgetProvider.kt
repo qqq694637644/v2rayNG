@@ -22,7 +22,12 @@ class WidgetProvider : AppWidgetProvider() {
      */
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        updateWidgetBackground(context, appWidgetManager, appWidgetIds, CoreServiceManager.isRunning())
+        updateWidgetBackground(
+            context,
+            appWidgetManager,
+            appWidgetIds,
+            CoreServiceManager.isServiceSessionActive(),
+        )
     }
 
     /**
@@ -67,7 +72,7 @@ class WidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         if (AppConfig.BROADCAST_ACTION_WIDGET_CLICK == intent.action) {
-            if (CoreServiceManager.isRunning()) {
+            if (CoreServiceManager.isServiceSessionActive()) {
                 CoreServiceManager.stopVService(context)
             } else {
                 CoreServiceManager.startVServiceFromToggle(context)

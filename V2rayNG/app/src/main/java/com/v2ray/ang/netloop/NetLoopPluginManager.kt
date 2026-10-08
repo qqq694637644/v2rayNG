@@ -89,6 +89,9 @@ class NetLoopPluginManager(
     @Volatile
     private var suppressDisconnect = false
 
+    @Volatile
+    private var connectionLost = false
+
     private var bindDeferred: CompletableDeferred<Messenger>? = null
 
     private val replyMessenger = Messenger(
@@ -109,6 +112,7 @@ class NetLoopPluginManager(
             val messenger = Messenger(service)
             synchronized(bindingLock) {
                 if (!bound) return
+                connectionLost = false
                 remote = messenger
                 bindDeferred?.complete(messenger)
                 bindDeferred = null
@@ -174,7 +178,10 @@ class NetLoopPluginManager(
         expectedRunning = false
         suppressDisconnect = true
         try {
-            val target = connect()
+            val target = currentConnectionOrNull() ?: run {
+                detachInternal()
+                return
+            }
             val binder = target.binder
             val died = CompletableDeferred<Unit>()
             val deathRecipient = IBinder.DeathRecipient {
@@ -190,7 +197,7 @@ class NetLoopPluginManager(
                 }
 
                 try {
-                    val response = request(COMMAND_STOP, Bundle())
+                    val response = request(target, COMMAND_STOP, Bundle())
                     requireOk(response)
                 } catch (e: Exception) {
                     if (binder.isBinderAlive) throw e
@@ -251,6 +258,10 @@ class NetLoopPluginManager(
 
     private suspend fun request(command: Int, data: Bundle): Bundle {
         val target = connect()
+        return request(target, command, data)
+    }
+
+    private suspend fun request(target: Messenger, command: Int, data: Bundle): Bundle {
         val requestId = requestIds.getAndIncrement().let {
             if (it > 0) it else 1
         }
@@ -271,6 +282,21 @@ class NetLoopPluginManager(
         } finally {
             pending.remove(requestId)
             message.recycle()
+        }
+    }
+
+    private suspend fun currentConnectionOrNull(): Messenger? {
+        remote?.let { return it }
+
+        val deferred = synchronized(bindingLock) {
+            remote?.let { return it }
+            if (connectionLost) return null
+            if (!bound) return null
+            bindDeferred
+        } ?: return null
+
+        return withTimeout(REQUEST_TIMEOUT_MS) {
+            deferred.await()
         }
     }
 
@@ -308,6 +334,7 @@ class NetLoopPluginManager(
                         }
                         throw IllegalStateException("Unable to bind NetLoop control service.")
                     }
+                    connectionLost = false
                     bound = true
                 }
             }
@@ -321,6 +348,7 @@ class NetLoopPluginManager(
     private fun handleDisconnected(reason: String) {
         val shouldNotify: Boolean
         synchronized(bindingLock) {
+            connectionLost = true
             remote = null
             bindDeferred = CompletableDeferred()
             failPending(reason)
@@ -335,6 +363,7 @@ class NetLoopPluginManager(
         val shouldUnbind = synchronized(bindingLock) {
             val wasBound = bound
             bound = false
+            connectionLost = true
             remote = null
             bindDeferred?.completeExceptionally(IllegalStateException(reason))
             bindDeferred = null
@@ -365,6 +394,7 @@ class NetLoopPluginManager(
                 }
             }
             bound = false
+            connectionLost = false
             remote = null
             bindDeferred = null
             failPending("NetLoop control service binding closed.")

@@ -121,19 +121,12 @@ class CoreVpnService : VpnService(), ServiceControl {
 
         netLoopStartJob?.cancel()
         netLoopRecoveryJob?.cancel()
-        if (!isStopping) {
-            // Observable VPN service destruction owns the companion lifetime.
-            // A hard process kill still cannot be coordinated and is accepted
-            // without adding a lease/watchdog protocol.
-            runBlocking {
-                try {
-                    netLoopManager?.stopAndWaitGone()
-                } catch (e: Exception) {
-                    LogUtil.w(AppConfig.TAG, "StartCore-VPN: Failed to await NetLoop shutdown", e)
-                }
-            }
-            netLoopManager = null
-        }
+        // onDestroy runs on the main thread, while Messenger replies are also
+        // delivered by the main Looper. Never wait for the Binder/process-final
+        // barrier here; abnormal destruction is best-effort only. Normal STOP
+        // and observable failure paths await stopAndWaitGone() before stopSelf().
+        netLoopManager?.stop()
+        netLoopManager = null
         runBlocking {
             CoreServiceManager.stopCoreLoopForServiceDestroy(this@CoreVpnService)
         }
@@ -212,7 +205,6 @@ class CoreVpnService : VpnService(), ServiceControl {
             if (netLoopSessionActive) {
                 failNetLoopStartup(
                     IllegalStateException("Failed to start Xray for NetLoop mode."),
-                    stopPlugin = true,
                 )
             } else {
                 requestStop()
@@ -593,7 +585,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         } catch (_: CancellationException) {
             throw CancellationException()
         } catch (e: Exception) {
-            failNetLoopStartup(e, stopPlugin = true)
+            failNetLoopStartup(e)
         }
     }
 
@@ -666,22 +658,16 @@ class CoreVpnService : VpnService(), ServiceControl {
         }
     }
 
-    private fun failNetLoopStartup(error: Exception, stopPlugin: Boolean) {
+    private fun failNetLoopStartup(error: Exception) {
         val message = error.message ?: error.javaClass.simpleName
         LogUtil.e(AppConfig.TAG, "NetLoop startup failed: $message", error)
-        if (stopPlugin) {
-            netLoopManager?.stop()
-            netLoopManager = null
-        }
-        requestStop(stopNetLoop = false, failureMessage = message)
+        requestStop(stopNetLoop = true, failureMessage = message)
     }
 
     private fun failNetLoopRuntime(error: Exception) {
         val message = error.message ?: error.javaClass.simpleName
         LogUtil.e(AppConfig.TAG, "NetLoop runtime failed: $message", error)
-        netLoopManager?.stop()
-        netLoopManager = null
-        requestStop(stopNetLoop = false, failureMessage = message)
+        requestStop(stopNetLoop = true, failureMessage = message)
     }
 }
 
